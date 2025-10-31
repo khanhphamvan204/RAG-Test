@@ -56,13 +56,37 @@
 #   app-network:
 #     driver: bridge
 
+# services:
+#   # FastAPI Application
+#   app:
+#     build:
+#       context: .
+#       dockerfile: Dockerfile
+#     container_name: faiss-api-main
+#     ports:
+#       - "3636:3636"
+#     volumes:
+#       - ./Root_Folder:/app/Root_Folder
+#       - ./.env:/app/.env
+#     environment:
+#       - PYTHONUNBUFFERED=1
+#     networks:
+#       - app-network
+#     restart: unless-stopped
+
+# networks:
+#   app-network:
+#     driver: bridge
+
+version: '3.8'
+
 services:
   # FastAPI Application
   app:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: faiss-api-main
+    container_name: redis-rag
     ports:
       - "3636:3636"
     volumes:
@@ -72,7 +96,64 @@ services:
       - PYTHONUNBUFFERED=1
     networks:
       - app-network
+    depends_on:
+      mongo:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
     restart: unless-stopped
+
+  # MongoDB Database
+  mongo:
+    image: mongo:6.0
+    container_name: mongo-db
+    ports:
+      - "27018:27017"
+    volumes:
+      - mongo-data:/data/db
+    environment:
+      - MONGO_INITDB_ROOT_USERNAME=admin
+      - MONGO_INITDB_ROOT_PASSWORD=123
+      - MONGO_INITDB_DATABASE=faiss_db
+    healthcheck:
+      test: |
+        mongosh --host localhost \
+                --port 27017 \
+                --username admin \
+                --password 123 \
+                --authenticationDatabase admin \
+                --eval "db.adminCommand('ping')"
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    networks:
+      - app-network
+    restart: unless-stopped
+
+  # --- SERVICE REDIS STACK MỚI ---
+  redis:
+    image: redis/redis-stack:latest
+    container_name: redis-stack-db
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: [ "CMD", "redis-cli", "ping" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    networks:
+      - app-network
+    restart: unless-stopped
+
+volumes:
+  mongo-data:
+    driver: local
+  redis-data:
+    driver: local
 
 networks:
   app-network:

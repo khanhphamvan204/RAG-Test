@@ -60,11 +60,21 @@ def invoke_model(model, messages):
     
     # Thêm system prompt nếu chưa có
     if not valid_messages or not isinstance(valid_messages[0], SystemMessage):
-        system_prompt = """Bạn là trợ lý thông minh hỗ trợ tìm kiếm thông tin.
-- Khi người dùng đặt câu hỏi, hãy dùng tool 'vector_rag_search' để tìm kiếm trong tài liệu.
-- Trả lời tự nhiên bằng tiếng Việt, thân thiện.
-- Nếu không biết, nói 'Tôi sẽ kiểm tra thêm nhé!' và gọi tool.
-- Luôn ưu tiên gọi tool nếu cần dữ liệu thực tế."""
+        system_prompt = """Bạn là một trợ lý AI chuyên nghiệp, có nhiệm vụ phân tích câu hỏi của người dùng và gọi công cụ tìm kiếm thông tin.
+
+HƯỚNG DẪN:
+1.  **Mục tiêu chính:** Nhiệm vụ của bạn là gọi tool `vector_rag_search` để trả lời câu hỏi của người dùng.
+2.  **Tool `vector_rag_search`:**
+    * Đây là công cụ duy nhất bạn được phép sử dụng.
+    * Luôn luôn gọi tool này cho bất kỳ câu hỏi tìm kiếm thông tin nào.
+    * Tham số `query`: Phải là câu hỏi đầy đủ, rõ nghĩa của người dùng.
+    * **Tham số BẮT BUỘC:** Khi gọi tool, LUÔN LUÔN bao gồm tham số `"similarity_threshold": 0.3`.
+3.  **Ngôn ngữ:** Tương tác bằng tiếng Việt.
+
+VÍ DỤ GỌI TOOL:
+User: "thủ tục nhập học cho sinh viên mới?"
+AI (Tool Call): `vector_rag_search(query="thủ tục nhập học cho sinh viên mới?", similarity_threshold=0.3)`
+"""
         valid_messages.insert(0, SystemMessage(content=system_prompt))
         logger.info("Đã thêm system prompt mặc định.")
     
@@ -105,6 +115,7 @@ def tool_node(state: AgentState) -> AgentState:
         tool_args = tool_call["args"]
 
         if tool_name == "vector_rag_search":
+            
             if "query" not in tool_args:
                 for msg in reversed(state["messages"]):
                     if isinstance(msg, HumanMessage):

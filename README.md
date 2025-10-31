@@ -802,7 +802,7 @@ mongo:
    ```bash
    # Thay đổi port trong docker-compose.yml
    ports:
-     - "8001:3636"  # Host:Container
+     - "3636:3636"  # Host:Container
    ```
 
 2. **MongoDB không start:**

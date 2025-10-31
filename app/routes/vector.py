@@ -1,6 +1,9 @@
 import traceback
 from fastapi import APIRouter, UploadFile, File, HTTPException, Form, Depends
-from app.services.embedding_service import add_to_embedding, delete_from_faiss_index, smart_metadata_update
+from app.services.embedding_service import (
+    add_to_embedding, delete_from_redis_index, smart_metadata_update,
+    get_embedding_model, get_redis_client
+)
 from app.services.langgraph_service import process_query
 from app.services.metadata_service import save_metadata, delete_metadata, find_document_info
 from app.services.file_service import get_file_paths
@@ -14,9 +17,10 @@ from datetime import datetime, timezone, timedelta
 import shutil
 import logging
 from langchain_google_genai import ChatGoogleGenerativeAI
-from langchain_community.vectorstores import FAISS
+from redisvl.index import SearchIndex
+from redisvl.query import VectorQuery
 import time
-from app.services.embedding_service import get_embedding_model
+import numpy as np
 from dotenv import load_dotenv
 from app.models.vector_models import (
     AddVectorRequest,
@@ -35,11 +39,8 @@ router = APIRouter()
 logger = logging.getLogger(__name__)
 
 def standardization(distance: float) -> float:
-    """Chuyển đổi khoảng cách L2 thành điểm tương đồng (similarity score) trong khoảng [0, 1]."""
-    if distance < 0:
-        return 0.0
-    else:
-        return 1 / (1 + distance)
+    """Chuyển đổi cosine distance thành similarity score"""
+    return 1 - distance
 
 @router.post("/add", response_model=dict)
 async def add_vector_document(
@@ -50,7 +51,6 @@ async def add_vector_document(
     try:
         file_name = file.filename
         
-        # Check for duplicate filename
         file_path, vector_db_path = get_file_paths(file_name)
         if os.path.exists(file_path):
             raise HTTPException(
@@ -58,13 +58,11 @@ async def add_vector_document(
                 detail=f"File already exists at path: {file_path}"
             )
         
-        # Validate file extension
         supported_extensions = {'.pdf', '.txt', '.docx', '.csv', '.xlsx', '.xls'}
         file_extension = os.path.splitext(file_name.lower())[1]
         if file_extension not in supported_extensions:
             raise HTTPException(status_code=400, detail=f"File format {file_extension} not supported")
         
-        # Generate unique ID and metadata
         generated_id = str(uuid.uuid4())
         vietnam_tz = timezone(timedelta(hours=7))
         created_at = datetime.now(vietnam_tz).isoformat()
@@ -80,17 +78,14 @@ async def add_vector_document(
             createdAt=created_at
         )
         
-        # Save file to disk
         os.makedirs(os.path.dirname(file_path), exist_ok=True)
         with open(file_path, "wb") as buffer:
             shutil.copyfileobj(file.file, buffer)
         
-        # Save metadata and add to embedding
         try:
             save_metadata(metadata)
             add_to_embedding(file_path, metadata)
         except Exception as embed_error:
-            # Clean up file if metadata/embedding fails
             if os.path.exists(file_path):
                 os.remove(file_path)
             raise HTTPException(
@@ -127,7 +122,7 @@ async def delete_vector_document(
         filename = doc_info.get('filename')
         file_path = doc_info.get('url')
         
-        _, vector_db_path = get_file_paths(filename)
+        index_name = f"docs_{filename.replace('.', '_').replace(' ', '_')}"
         
         deletion_results = {
             "file_deleted": False,
@@ -139,7 +134,7 @@ async def delete_vector_document(
             os.remove(file_path)
             deletion_results["file_deleted"] = True
         
-        deletion_results["vector_deleted"] = delete_from_faiss_index(vector_db_path, doc_id)
+        deletion_results["vector_deleted"] = delete_from_redis_index(index_name, doc_id)
         deletion_results["metadata_deleted"] = delete_metadata(doc_id)
         
         message = "Document deleted successfully" if all(deletion_results.values()) else "Document partially deleted"
@@ -170,8 +165,11 @@ async def get_vector_document(
         file_path = doc_info.get('url')
         file_exists = os.path.exists(file_path) if file_path else False
         
-        _, vector_db_path = get_file_paths(doc_info.get('filename'))
-        vector_exists = os.path.exists(f"{vector_db_path}/index.faiss") and os.path.exists(f"{vector_db_path}/index.pkl")
+        filename = doc_info.get('filename')
+        index_name = f"docs_{filename.replace('.', '_').replace(' ', '_')}"
+        
+        redis_client = get_redis_client()
+        vector_exists = len(list(redis_client.scan_iter(match=f"doc:{index_name}:*", count=1))) > 0
         
         file_size = os.path.getsize(file_path) if file_exists else None
         
@@ -183,7 +181,7 @@ async def get_vector_document(
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error getting document: {str(e)}")
-
+    
 @router.put("/{doc_id}", response_model=dict)
 async def update_vector_document(
     doc_id: str,
@@ -201,7 +199,6 @@ async def update_vector_document(
         current_filename = current_doc.get('filename')
         current_file_path = current_doc.get('url')
         
-        # Handle filename validation and extension protection
         final_filename = current_filename
         if filename:
             current_name, current_extension = os.path.splitext(current_filename)
@@ -222,7 +219,6 @@ async def update_vector_document(
                     detail=f"Current file extension '{current_extension}' is not supported"
                 )
         
-        # Check for duplicate filename if filename is being changed
         if filename and final_filename != current_filename:
             target_file_path, _ = get_file_paths(final_filename)
             if os.path.exists(target_file_path):
@@ -278,9 +274,7 @@ async def update_vector_document(
             "operations": operations,
             "paths": {
                 "old_file_path": current_file_path,
-                "new_file_path": final_file_path,
-                "old_vector_db": get_file_paths(current_filename)[1],
-                "new_vector_db": get_file_paths(new_filename)[1]
+                "new_file_path": final_file_path
             },
             "updatedAt": datetime.now(timezone(timedelta(hours=7))).isoformat(),
             "force_re_embed": force_re_embed
@@ -305,10 +299,12 @@ async def search_vector_documents(
     start_time = time.time()
     
     try:
-        _, vector_db_path = get_file_paths("dummy_filename")
+        embedding_model = get_embedding_model()
+        redis_client = get_redis_client()
         
-        # Check if vector DB exists
-        if not (os.path.exists(f"{vector_db_path}/index.faiss") and os.path.exists(f"{vector_db_path}/index.pkl")):
+        # Get all index names
+        all_keys = list(redis_client.scan_iter(match="doc:docs_*:0"))
+        if not all_keys:
             return VectorSearchResponse(
                 query=request.query,
                 results=[],
@@ -318,51 +314,88 @@ async def search_vector_documents(
                 search_time_ms=round((time.time() - start_time) * 1000, 2)
             )
         
-        # Use consistent embedding model
-        try:
-            embedding_model = get_embedding_model()
-            db = FAISS.load_local(vector_db_path, embedding_model, allow_dangerous_deserialization=True)
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=f"Failed to load vector database: {str(e)}")
+        index_names = set()
+        for key in all_keys:
+            key_str = key.decode('utf-8') if isinstance(key, bytes) else key
+            parts = key_str.split(':')
+            if len(parts) >= 2:
+                index_names.add(parts[1])
         
-        # Perform similarity search with scores
-        try:
-            docs_with_scores = db.similarity_search_with_score(
-                request.query, 
-                k=request.k 
-            )
-            
-            # Convert L2 distance to similarity score
-            standardization_docs = [
-                (doc, standardization(score)) for doc, score in docs_with_scores 
-            ]
-
-            filtered_docs = [
-                (doc, score) for doc, score in standardization_docs
-                if score >= request.similarity_threshold  
-            ]
-            
-            # Convert to SearchResult format
-            search_results = [
-                {
-                    "content": doc.page_content,
-                    "metadata": {**doc.metadata, "similarity_score": float(score)}
-                }
-                for doc, score in filtered_docs
-            ]
-            
-            top_results = search_results[:request.k]
-            
-            results = [
-                SearchResult(
-                    content=result["content"], 
-                    metadata=result["metadata"]
+        # Generate query embedding
+        query_embedding = embedding_model.embed_query(request.query)
+        query_vector = np.array(query_embedding, dtype=np.float32)
+        
+        all_results = []
+        
+        # Search across all indexes
+        for index_name in index_names:
+            try:
+                v = VectorQuery(
+                    vector=query_vector.tolist(),
+                    vector_field_name="embedding",
+                    return_fields=["content", "doc_id", "filename", "uploaded_by", "created_at"],
+                    num_results=request.k
                 )
-                for result in top_results
-            ]
-            
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=f"Search execution failed: {str(e)}")
+                
+                schema = {
+                    "index": {
+                        "name": index_name,
+                        "prefix": f"doc:{index_name}",
+                        "storage_type": "hash"
+                    },
+                    "fields": [
+                        {"name": "content", "type": "text"},
+                        {"name": "doc_id", "type": "tag"},
+                        {"name": "filename", "type": "text"},
+                        {"name": "uploaded_by", "type": "text"},
+                        {"name": "created_at", "type": "text"},
+                        {
+                            "name": "embedding",
+                            "type": "vector",
+                            "attrs": {
+                                "dims": len(query_embedding),
+                                "distance_metric": "cosine",
+                                "algorithm": "flat",
+                                "datatype": "float32"
+                            }
+                        }
+                    ]
+                }
+                
+                index = SearchIndex.from_dict(schema)
+                index.connect(redis_client)
+                
+                results = index.query(v)
+                
+                for result in results:
+                    similarity = standardization(float(result.get('vector_distance', 1.0)))
+                    if similarity >= request.similarity_threshold:
+                        all_results.append({
+                            "content": result.get('content', ''),
+                            "metadata": {
+                                "doc_id": result.get('doc_id', ''),
+                                "filename": result.get('filename', ''),
+                                "uploaded_by": result.get('uploaded_by', ''),
+                                "created_at": result.get('created_at', ''),
+                                "similarity_score": similarity
+                            }
+                        })
+                
+            except Exception as e:
+                logger.error(f"Error searching index {index_name}: {e}")
+                continue
+        
+        # Sort and limit results
+        all_results.sort(key=lambda x: x['metadata']['similarity_score'], reverse=True)
+        top_results = all_results[:request.k]
+        
+        results = [
+            SearchResult(
+                content=result["content"], 
+                metadata=result["metadata"]
+            )
+            for result in top_results
+        ]
         
         search_time_ms = round((time.time() - start_time) * 1000, 2)
         return VectorSearchResponse(
@@ -388,56 +421,71 @@ async def search_with_llm(
     start_time = time.time()
 
     try:
-        _, vector_db_path = get_file_paths("dummy_filename")
-
-        # Check if vector DB exists
-        if not (os.path.exists(f"{vector_db_path}/index.faiss") and os.path.exists(f"{vector_db_path}/index.pkl")):
+        embedding_model = get_embedding_model()
+        redis_client = get_redis_client()
+        
+        all_keys = list(redis_client.scan_iter(match="doc:docs_*:0"))
+        if not all_keys:
             return {"llm_response": "No relevant information found in the provided documents."}
-
-        # Load vector DB
-        try:
-            embedding_model = get_embedding_model()
-            db = FAISS.load_local(vector_db_path, embedding_model, allow_dangerous_deserialization=True)
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=f"Failed to load vector database: {str(e)}")
-
-        # Perform similarity search
-        try:
-            docs_with_scores = db.similarity_search_with_score(
-                request.query,
-                k=request.k
-            )
-
-            # Chuẩn hóa và lọc theo threshold
-            filtered_docs = [
-                (doc, standardization(score)) for doc, score in docs_with_scores
-                if standardization(score) >= request.similarity_threshold
-            ]
-
-            # Chuyển sang dict
-            search_results = [
-                {
-                    "content": doc.page_content,
-                    "metadata": {**doc.metadata, "similarity_score": float(score)}
+        
+        index_names = set()
+        for key in all_keys:
+            key_str = key.decode('utf-8') if isinstance(key, bytes) else key
+            parts = key_str.split(':')
+            if len(parts) >= 2:
+                index_names.add(parts[1])
+        
+        query_embedding = embedding_model.embed_query(request.query)
+        query_vector = np.array(query_embedding, dtype=np.float32)
+        
+        all_results = []
+        
+        for index_name in index_names:
+            try:
+                v = VectorQuery(
+                    vector=query_vector.tolist(),
+                    vector_field_name="embedding",
+                    return_fields=["content", "doc_id", "filename"],
+                    num_results=request.k
+                )
+                
+                schema = {
+                    "index": {"name": index_name, "prefix": f"doc:{index_name}", "storage_type": "hash"},
+                    "fields": [
+                        {"name": "content", "type": "text"},
+                        {"name": "doc_id", "type": "tag"},
+                        {"name": "filename", "type": "text"},
+                        {"name": "embedding", "type": "vector", "attrs": {
+                            "dims": len(query_embedding), "distance_metric": "cosine",
+                            "algorithm": "flat", "datatype": "float32"}}
+                    ]
                 }
-                for doc, score in filtered_docs
-            ]
-
-            top_results = search_results[:request.k]
-
-            # Generate LLM response
-            llm_response = "No relevant information found in the provided documents."
-            if top_results:
-                try:
-                    llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash")
-
-                    context = "\n\n".join(
-                        [f"Document {i+1}:\n{result['content']}" for i, result in enumerate(top_results)]
-                    )
-
-                    prompt_template = PromptTemplate(
-                        input_variables=["query", "context"],
-                        template="""
+                
+                index = SearchIndex.from_dict(schema)
+                index.connect(redis_client)
+                results = index.query(v)
+                
+                for result in results:
+                    similarity = standardization(float(result.get('vector_distance', 1.0)))
+                    if similarity >= request.similarity_threshold:
+                        all_results.append({"content": result.get('content', ''), "score": similarity})
+                
+            except Exception as e:
+                logger.error(f"Error: {e}")
+                continue
+        
+        all_results.sort(key=lambda x: x['score'], reverse=True)
+        top_results = all_results[:request.k]
+        
+        llm_response = "No relevant information found."
+        if top_results:
+            try:
+                llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash")
+                context = "\n\n".join([f"Doc {i+1}:\n{r['content']}" for i, r in enumerate(top_results)])
+                
+                prompt_template = PromptTemplate(
+                    input_variables=["query", "context"],
+                    template="""
 🎯 Vai trò:
 Bạn là một trợ lý AI chuyên nghiệp, chỉ trả lời dựa trên thông tin từ **tài liệu được cung cấp**.
 
@@ -466,25 +514,15 @@ Bạn là một trợ lý AI chuyên nghiệp, chỉ trả lời dựa trên th�
 
 Hãy trả lời câu hỏi dựa trên tài liệu trên.
 """
-                    )
-
-                    prompt = prompt_template.format(query=request.query, context=context)
-                    llm_response = llm.invoke(prompt).content
-
-                except Exception as e:
-                    logger.error(f"LLM response generation failed: {str(e)}")
-                    llm_response = "Failed to generate LLM response."
-
-            return {"llm_response": llm_response}
-
-        except Exception as e:
-            logger.error(f"Search execution failed: {traceback.format_exc()}")
-            raise HTTPException(status_code=500, detail=f"Search execution failed: {str(e)}")
-
-    except HTTPException:
-        raise
+                )
+                llm_response = llm.invoke(prompt_template.format(query=request.query, context=context)).content
+            except Exception as e:
+                logger.error(f"LLM failed: {e}")
+        
+        return {"llm_response": llm_response}
+        
     except Exception as e:
-        logger.error(f"Traceback: {traceback.format_exc()}")
+        logger.error(f"Error: {traceback.format_exc()}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
 class ProcessQueryRequest(BaseModel):
@@ -497,30 +535,19 @@ class ProcessQueryResponse(BaseModel):
     error: str | None
     thread_id: str | None
 
-# ================== API ROUTE ==================
 @router.post("/process-query", response_model=ProcessQueryResponse)  
-async def process_query_api(
-    request: ProcessQueryRequest,
-):
+async def process_query_api(request: ProcessQueryRequest):
     start_time = time.time()
     try:
         result_json = process_query(request.query, thread_id=request.thread_id)
-        
-        # Parse JSON string thành dict để validate với Pydantic
         result_dict = json.loads(result_json)
         
-        # Tạo instance Pydantic model từ dict (sẽ validate data)
         try:
             validated_response = ProcessQueryResponse(**result_dict)
             return validated_response
-        except ValueError as ve:  # Pydantic validation error
+        except ValueError as ve:
             logger.warning(f"Pydantic validation failed: {str(ve)}. Fallback to raw JSON.")
-            # Fallback: Trả về raw JSON mà không strict model
-            return JSONResponse(
-                content=result_dict,
-                status_code=200,
-                media_type="application/json"
-            )
+            return JSONResponse(content=result_dict, status_code=200, media_type="application/json")
             
     except HTTPException:
         raise

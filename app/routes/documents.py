@@ -2,7 +2,7 @@ from fastapi import APIRouter, HTTPException, Depends
 import logging
 from pymongo import MongoClient
 from pymongo.errors import PyMongoError
-from app.config import Config
+from app.config import Config  # Đảm bảo import này đúng
 import os
 import json
 from app.services.auth_service import verify_token_v2
@@ -53,7 +53,7 @@ async def get_file_types(current_user: dict = Depends(verify_token_v2)):
 @router.get("/list", response_model=dict)
 async def list_documents(
     file_type: str = None, 
-    q: str = None,            
+    q: str = None,          
     limit: int = 100, 
     skip: int = 0,
     current_user: dict = Depends(verify_token_v2)
@@ -107,32 +107,38 @@ async def list_documents(
 
         # Fallback: JSON
         logger.info("Falling back to JSON files")
-        base_path = Config.DATA_PATH
-        file_type_paths = Config.get_file_type_paths()
-        metadata_paths = [
-            os.path.join(base_path, file_type_paths[role]['vector_folder'], "metadata.json")
-            for role in file_type_paths
-        ]
-
+        
+        # --- PHẦN ĐÃ SỬA ---
+        # Xây dựng đường dẫn duy nhất đến metadata.json dựa trên Config
+        metadata_file = os.path.join(
+            Config.DATA_PATH, 
+            Config.FILE_PATHS.get('vector_folder', 'Rag_Info/Faiss_Folder'), 
+            "metadata.json"
+        )
+        
         all_documents = []
-        for metadata_file in metadata_paths:
-            try:
-                if os.path.exists(metadata_file):
-                    with open(metadata_file, "r", encoding="utf-8") as f:
-                        metadata_list = json.load(f)
+        try:
+            if os.path.exists(metadata_file):
+                with open(metadata_file, "r", encoding="utf-8") as f:
+                    metadata_list = json.load(f)
 
-                    if file_type:
-                        metadata_list = [item for item in metadata_list if item.get("file_type") == file_type]
-                    if q:
-                        metadata_list = [
-                            item for item in metadata_list
-                            if q.lower() in item.get("filename", "").lower()
-                            or q.lower() in item.get("uploaded_by", "").lower()
-                        ]
+                # Áp dụng filter
+                if file_type:
+                    metadata_list = [item for item in metadata_list if item.get("file_type") == file_type]
+                if q:
+                    metadata_list = [
+                        item for item in metadata_list
+                        if q.lower() in item.get("filename", "").lower()
+                        or q.lower() in item.get("uploaded_by", "").lower()
+                    ]
 
-                    all_documents.extend(metadata_list)
-            except Exception as e:
-                logger.error(f"Error reading {metadata_file}: {str(e)}")
+                all_documents.extend(metadata_list)
+            else:
+                logger.warning(f"JSON metadata file not found: {metadata_file}")
+                
+        except Exception as e:
+            logger.error(f"Error reading {metadata_file}: {str(e)}")
+        # --- KẾT THÚC PHẦN SỬA ---
 
         # Sort + paginate
         all_documents.sort(key=lambda x: x.get("createdAt", ""), reverse=True)
@@ -149,6 +155,7 @@ async def list_documents(
     except Exception as e:
         logger.error(f"Error retrieving documents: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Error retrieving documents: {str(e)}")
+
 def convert_to_str(d):
     """Recursively convert all values in a dictionary to strings."""
     if isinstance(d, dict):
@@ -192,7 +199,7 @@ async def get_document_details(
         if not doc:
             raise HTTPException(status_code=404, detail="Tài liệu không tồn tại")
 
-        doc = convert_to_str(doc)   # _id, createdAt → str
+        doc = convert_to_str(doc)  # _id, createdAt → str
 
         # Ẩn đường dẫn nội bộ
         if "url" in doc:

@@ -6,12 +6,17 @@ from functools import lru_cache
 from langchain.docstore.document import Document
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_experimental.text_splitter import SemanticChunker
-from langchain_community.vectorstores import FAISS
+from redisvl.index import SearchIndex
+from redisvl.query import VectorQuery
+from redisvl.query.filter import Tag, Text
 from app.config import Config
 from app.services.file_service import get_file_paths
 from app.services.metadata_service import find_document_info
 from app.services.document_loader import load_new_documents
 from langchain_community.embeddings import HuggingFaceEmbeddings
+import redis
+import numpy as np
+import json
 
 logger = logging.getLogger(__name__)
 
@@ -19,15 +24,40 @@ logger = logging.getLogger(__name__)
 _embedding_model_cache = None
 _embedding_model_lock = None
 
+# Redis connection
+_redis_client = None
+
 try:
     import threading
     _embedding_model_lock = threading.Lock()
 except ImportError:
-    # Fallback nếu không có threading
     class DummyLock:
         def __enter__(self): return self
         def __exit__(self, *args): pass
     _embedding_model_lock = DummyLock()
+
+def get_redis_client():
+    """Get Redis client connection"""
+    global _redis_client
+    if _redis_client is None:
+        _redis_client = redis.Redis(
+            host=os.getenv('REDIS_HOST', 'localhost'),
+            port=int(os.getenv('REDIS_PORT', 6379)),
+            db=int(os.getenv('REDIS_DB', 0)),
+            decode_responses=False
+        )
+    return _redis_client
+
+def get_redis_url():
+    """Get Redis connection URL for RedisVL"""
+    host = os.getenv('REDIS_HOST', 'localhost')
+    port = os.getenv('REDIS_PORT', '6379')
+    db = os.getenv('REDIS_DB', '0')
+    password = os.getenv('REDIS_PASSWORD', '')
+    
+    if password:
+        return f"redis://:{password}@{host}:{port}/{db}"
+    return f"redis://{host}:{port}/{db}"
 
 @lru_cache(maxsize=1)
 def _create_embedding_model():
@@ -36,7 +66,7 @@ def _create_embedding_model():
     
     model = HuggingFaceEmbeddings(
         model_name="dangvantuan/vietnamese-document-embedding",
-        model_kwargs={'device': 'cuda', 'trust_remote_code': True}, 
+        model_kwargs={'device': 'cpu', 'trust_remote_code': True}, 
         encode_kwargs={'normalize_embeddings': True}
     )
     
@@ -49,7 +79,6 @@ def get_embedding_model():
     
     if _embedding_model_cache is None:
         with _embedding_model_lock:
-            # Double-check pattern
             if _embedding_model_cache is None:
                 _embedding_model_cache = _create_embedding_model()
     
@@ -62,7 +91,6 @@ def clear_embedding_model_cache():
         if _embedding_model_cache is not None:
             logger.info("Clearing embedding model cache")
             _embedding_model_cache = None
-            # Clear LRU cache
             _create_embedding_model.cache_clear()
             gc.collect()
 
@@ -79,17 +107,7 @@ class EmbeddingModelManager:
         pass
 
 def semantic_sliding_window_split(text: str, embedding_model, window_overlap: float = 0.2) -> List[str]:
-    """
-    Sliding window với tỷ lệ overlap dựa trên semantic boundaries
-    
-    Args:
-        text: Văn bản cần chia
-        embedding_model: Model embedding (đã được cached)
-        window_overlap: Tỷ lệ overlap (0.0-1.0)
-    
-    Returns:
-        List các chunk có overlap theo tỷ lệ
-    """
+    """Sliding window với tỷ lệ overlap dựa trên semantic boundaries"""
     try:
         semantic_chunker = SemanticChunker(
             embeddings=embedding_model,
@@ -171,20 +189,55 @@ def get_text_splitter(use_semantic: bool = True, semantic_overlap: float = 0.2, 
             chunk_overlap=200
         )
 
+def get_redis_index(index_name: str, embedding_dim: int = 768):
+    """Create or get Redis search index"""
+    schema = {
+        "index": {
+            "name": index_name,
+            "prefix": f"doc:{index_name}",
+            "storage_type": "hash"
+        },
+        "fields": [
+            {"name": "content", "type": "text"},
+            {"name": "doc_id", "type": "tag"},
+            {"name": "filename", "type": "text"},
+            {"name": "uploaded_by", "type": "text"},
+            {"name": "created_at", "type": "text"},
+            {
+                "name": "embedding",
+                "type": "vector",
+                "attrs": {
+                    "dims": embedding_dim,
+                    "distance_metric": "cosine",
+                    "algorithm": "flat",
+                    "datatype": "float32"
+                }
+            }
+        ]
+    }
+    
+    try:
+        index = SearchIndex.from_dict(schema)
+        # Connect using Redis URL string instead of client object
+        index.connect(get_redis_url())
+        index.create(overwrite=False)
+        logger.info(f"Redis index '{index_name}' created/loaded successfully")
+        return index
+    except Exception as e:
+        logger.error(f"Error creating Redis index: {e}")
+        raise
+
 def add_to_embedding(file_path: str, metadata, use_semantic_chunking: bool = True, semantic_overlap: float = 0.2):
-    """Add documents to vector database - optimized version"""
+    """Add documents to Redis vector database"""
     try:
         logger.info(f"Starting embedding process for: {file_path}")
         
-        # Load documents
         documents = load_new_documents(file_path, metadata)
         if not documents:
             logger.warning(f"No documents loaded from {file_path}")
             return False
 
-        # Get embedding model once
         with EmbeddingModelManager() as embedding_model:
-            # Split into chunks with semantic or traditional splitter
             text_splitter = get_text_splitter(
                 use_semantic=use_semantic_chunking, 
                 semantic_overlap=semantic_overlap,
@@ -194,7 +247,7 @@ def add_to_embedding(file_path: str, metadata, use_semantic_chunking: bool = Tru
             try:
                 chunks = text_splitter.split_documents(documents)
                 if use_semantic_chunking:
-                    logger.info(f"Successfully created {len(chunks)} chunks using semantic chunking with {semantic_overlap*100}% overlap")
+                    logger.info(f"Successfully created {len(chunks)} chunks using semantic chunking")
                 else:
                     logger.info(f"Successfully created {len(chunks)} chunks using traditional chunking")
             except Exception as e:
@@ -210,50 +263,33 @@ def add_to_embedding(file_path: str, metadata, use_semantic_chunking: bool = Tru
                 logger.warning(f"No chunks created from {file_path}")
                 return False
             
-            # Get paths
-            _, vector_db_path = get_file_paths(metadata.filename)
+            # Create Redis index
+            index_name = f"docs_{metadata.filename.replace('.', '_').replace(' ', '_')}"
+            embedding_dim = len(embedding_model.embed_query("test"))
+            index = get_redis_index(index_name, embedding_dim)
             
-            # Ensure directory exists
-            os.makedirs(vector_db_path, exist_ok=True)
+            # Add chunks to Redis
+            redis_client = get_redis_client()
             
-            # Check if index exists
-            index_exists = (
-                os.path.exists(f"{vector_db_path}/index.faiss") and 
-                os.path.exists(f"{vector_db_path}/index.pkl")
-            )
+            # Get metadata dict to access _id field properly
+            metadata_dict = metadata.dict(by_alias=True)
+            doc_id = metadata_dict.get('_id', metadata.id if hasattr(metadata, 'id') else '')
             
-            if index_exists:
-                logger.info("Loading existing FAISS index")
-                try:
-                    db = FAISS.load_local(
-                        vector_db_path, 
-                        embedding_model,
-                        allow_dangerous_deserialization=True
-                    )
-                    db.add_documents(chunks)
-                    logger.info(f"Added {len(chunks)} chunks to existing database")
-                except Exception as e:
-                    logger.error(f"Failed to load existing index: {e}")
-                    logger.info("Creating new FAISS index")
-                    db = FAISS.from_documents(chunks, embedding_model)
-            else:
-                logger.info("Creating new FAISS index")
-                db = FAISS.from_documents(chunks, embedding_model)
-            
-            # Save the database
-            try:
-                db.save_local(vector_db_path)
-                logger.info(f"Successfully saved FAISS index to {vector_db_path}")
+            for i, chunk in enumerate(chunks):
+                doc_key = f"doc:{index_name}:{i}"
+                embedding_vector = embedding_model.embed_query(chunk.page_content)
                 
-                if os.path.exists(f"{vector_db_path}/index.faiss"):
-                    faiss_size = os.path.getsize(f"{vector_db_path}/index.faiss")
-                    logger.info(f"FAISS index file size: {faiss_size} bytes")
-                
-                return True
-                
-            except Exception as e:
-                logger.error(f"Failed to save FAISS index: {e}")
-                return False
+                redis_client.hset(doc_key, mapping={
+                    "content": chunk.page_content,
+                    "doc_id": doc_id,
+                    "filename": metadata.filename,
+                    "uploaded_by": metadata.uploaded_by,
+                    "created_at": metadata.createdAt,
+                    "embedding": np.array(embedding_vector, dtype=np.float32).tobytes()
+                })
+            
+            logger.info(f"Successfully added {len(chunks)} chunks to Redis index '{index_name}'")
+            return True
             
     except Exception as e:
         logger.error(f"Error in add_to_embedding: {e}")
@@ -263,57 +299,42 @@ def add_to_embedding(file_path: str, metadata, use_semantic_chunking: bool = Tru
     finally:
         gc.collect()
 
-def delete_from_faiss_index(vector_db_path: str, doc_id: str) -> bool:
-    """Delete documents from FAISS index - optimized version"""
+def delete_from_redis_index(index_name: str, doc_id: str) -> bool:
+    """Delete documents from Redis index"""
     try:
-        index_path = f"{vector_db_path}/index.faiss"
-        pkl_path = f"{vector_db_path}/index.pkl"
+        redis_client = get_redis_client()
         
-        if not (os.path.exists(index_path) and os.path.exists(pkl_path)):
-            logger.warning(f"No FAISS index found at {vector_db_path}")
-            return True
+        # Find all keys with the doc_id
+        pattern = f"doc:{index_name}:*"
+        keys_to_delete = []
         
-        embedding_model = get_embedding_model()
-        db = FAISS.load_local(
-            vector_db_path, 
-            embedding_model, 
-            allow_dangerous_deserialization=True
-        )
+        for key in redis_client.scan_iter(match=pattern):
+            stored_doc_id = redis_client.hget(key, "doc_id")
+            if stored_doc_id and stored_doc_id.decode('utf-8') == doc_id:
+                keys_to_delete.append(key)
         
-        docstore = db.docstore
-        index_to_docstore_id = db.index_to_docstore_id
-        ids_to_delete = []
-        
-        for index, docstore_id in index_to_docstore_id.items():
-            doc = docstore.search(docstore_id)
-            if doc and doc.metadata.get('_id') == doc_id:
-                ids_to_delete.append(docstore_id)
-        
-        if ids_to_delete:
-            db.delete(ids=ids_to_delete)
-            db.save_local(vector_db_path)
-            logger.info(f"Deleted {len(ids_to_delete)} documents with _id: {doc_id}")
+        if keys_to_delete:
+            redis_client.delete(*keys_to_delete)
+            logger.info(f"Deleted {len(keys_to_delete)} documents with doc_id: {doc_id}")
         else:
-            logger.warning(f"No documents found with _id: {doc_id}")
+            logger.warning(f"No documents found with doc_id: {doc_id}")
         
         return True
         
     except Exception as e:
-        logger.error(f"Error deleting from FAISS index: {str(e)}")
+        logger.error(f"Error deleting from Redis index: {str(e)}")
         return False
 
 def update_document_metadata_in_vector_store(doc_id: str, old_metadata: dict, new_metadata, use_semantic_chunking: bool = True, semantic_overlap: float = 0.2) -> bool:
-    """Update document by re-embedding - optimized version"""
+    """Update document by re-embedding"""
     try:
         old_filename = old_metadata.get('filename')
-        _, old_vector_db_path = get_file_paths(old_filename)
+        old_index_name = f"docs_{old_filename.replace('.', '_').replace(' ', '_')}"
         
-        # Delete old document
-        success = delete_from_faiss_index(old_vector_db_path, doc_id)
+        success = delete_from_redis_index(old_index_name, doc_id)
         if not success:
             return False
         
-        # Re-embed with new metadata
         file_path = new_metadata.url
         if os.path.exists(file_path):
             return add_to_embedding(file_path, new_metadata, use_semantic_chunking, semantic_overlap)
@@ -326,36 +347,27 @@ def update_document_metadata_in_vector_store(doc_id: str, old_metadata: dict, ne
         return False
 
 def update_metadata_only(doc_id: str, new_metadata) -> bool:
-    """Update only metadata without re-embedding - optimized version"""
+    """Update only metadata without re-embedding"""
     try:
-        _, vector_db_path = get_file_paths(new_metadata.filename)
+        index_name = f"docs_{new_metadata.filename.replace('.', '_').replace(' ', '_')}"
+        redis_client = get_redis_client()
         
-        if not (os.path.exists(f"{vector_db_path}/index.faiss") and 
-                os.path.exists(f"{vector_db_path}/index.pkl")):
-            logger.warning(f"Vector database not found at {vector_db_path}")
-            return False
+        # Get metadata dict for proper field access
+        metadata_dict = new_metadata.dict(by_alias=True)
         
-        embedding_model = get_embedding_model()
-        db = FAISS.load_local(
-            vector_db_path, 
-            embedding_model, 
-            allow_dangerous_deserialization=True
-        )
-        
-        docstore = db.docstore
-        index_to_docstore_id = db.index_to_docstore_id
+        pattern = f"doc:{index_name}:*"
         updated_count = 0
-        new_metadata_dict = new_metadata.dict(by_alias=True)
         
-        for index, docstore_id in index_to_docstore_id.items():
-            doc = docstore.search(docstore_id)
-            if doc and doc.metadata.get('_id') == doc_id:
-                doc.metadata.update(new_metadata_dict)
-                docstore.add({docstore_id: doc})
+        for key in redis_client.scan_iter(match=pattern):
+            stored_doc_id = redis_client.hget(key, "doc_id")
+            if stored_doc_id and stored_doc_id.decode('utf-8') == doc_id:
+                redis_client.hset(key, mapping={
+                    "filename": new_metadata.filename,
+                    "uploaded_by": new_metadata.uploaded_by,
+                })
                 updated_count += 1
         
         if updated_count > 0:
-            db.save_local(vector_db_path)
             logger.info(f"Updated metadata for {updated_count} chunks of document: {doc_id}")
             return True
         else:
