@@ -1,349 +1,248 @@
-from typing import Annotated, Optional, Union
-from typing_extensions import TypedDict
-from langchain.chat_models import init_chat_model
+from typing import TypedDict, Annotated
+from langgraph.graph import StateGraph, END
+from langgraph.prebuilt import ToolNode
 from langgraph.checkpoint.memory import MemorySaver
-from langgraph.graph import StateGraph, START, END
-from langchain_core.messages import HumanMessage, AIMessage, ToolMessage, SystemMessage
-from langgraph.graph.message import add_messages
-from pydantic import BaseModel
-import os
+from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_core.messages import SystemMessage, HumanMessage, AIMessage, ToolMessage
+import operator
 import logging
-import uuid
 import json
 from dotenv import load_dotenv
+import os
+
+from app.services.rag_service import rag_search_tool
+from app.services.activity_search_service import (
+    activity_search_tool,
+    activity_search_with_llm_tool
+)
 
 load_dotenv()
 
-from app.services.tool_service import rag_search_tool
-
-# Cấu hình logging
-logging.basicConfig(
-    level=logging.DEBUG,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-)
 logger = logging.getLogger(__name__)
 
-# Biến môi trường
-os.environ["GOOGLE_API_KEY"] = os.getenv("GOOGLE_API_KEY")
 
-# ================== MODELS ==================
-class RAGResponse(BaseModel):
-    answer: str
-    search_type: str = "rag"
-
-class DirectResponse(BaseModel):
-    message: str
-    search_type: str = "direct"
-
-class Response(BaseModel):
-    status: str
-    data: Union[RAGResponse, DirectResponse, None] = None
-    error: Optional[str] = None
-    thread_id: Optional[str] = None
-
-# ================== STATE ==================
 class AgentState(TypedDict):
-    messages: Annotated[list, add_messages]
+    messages: Annotated[list, operator.add]
+    user_role: str
+    user_id: int
+    bearer_token: str
 
-memory = MemorySaver()
-model = init_chat_model("gemini-2.5-flash", model_provider="google_genai")
-model = model.bind_tools([rag_search_tool])
 
-def invoke_model(model, messages):
-    """Gọi model với custom system prompt."""
-    valid_messages = []
-    for msg in messages:
-        if isinstance(msg, AIMessage) and not msg.content and not getattr(msg, "tool_calls", []):
-            logger.warning(f"Bỏ qua tin nhắn rỗng: {msg}")
-            continue
-        valid_messages.append(msg)
-    
-    # Thêm system prompt nếu chưa có
-    if not valid_messages or not isinstance(valid_messages[0], SystemMessage):
-        system_prompt = """Bạn là một trợ lý AI chuyên nghiệp, có nhiệm vụ phân tích câu hỏi của người dùng và gọi công cụ tìm kiếm thông tin.
+def create_agent_node(llm_with_tools):
+    def agent(state: AgentState):
+        messages = state["messages"]
+        user_role = state.get("user_role", "student")
+        user_id = state.get("user_id", 0)
+        bearer_token = state.get("bearer_token", "")
+        
+        system_context = f"""
+Bạn là trợ lý AI cho hệ thống quản lý cố vấn học tập.
 
-HƯỚNG DẪN:
-1.  **Mục tiêu chính:** Nhiệm vụ của bạn là gọi tool `vector_rag_search` để trả lời câu hỏi của người dùng.
-2.  **Tool `vector_rag_search`:**
-    * Đây là công cụ duy nhất bạn được phép sử dụng.
-    * Luôn luôn gọi tool này cho bất kỳ câu hỏi tìm kiếm thông tin nào.
-    * Tham số `query`: Phải là câu hỏi đầy đủ, rõ nghĩa của người dùng.
-    * **Tham số BẮT BUỘC:** Khi gọi tool, LUÔN LUÔN bao gồm tham số `"similarity_threshold": 0.3`.
-3.  **Ngôn ngữ:** Tương tác bằng tiếng Việt.
+Người dùng hiện tại:
+- Vai trò: {user_role}
+- ID: {user_id}
+- Bearer token: ĐÃ ĐƯỢC CUNG CẤP
 
-VÍ DỤ GỌI TOOL:
-User: "thủ tục nhập học cho sinh viên mới?"
-AI (Tool Call): `vector_rag_search(query="thủ tục nhập học cho sinh viên mới?", similarity_threshold=0.3)`
+Công cụ có sẵn:
+1. vector_rag_search - Tìm tài liệu
+2. activity_search - Tìm hoạt động (dữ liệu thô)
+3. activity_search_with_summary - Tìm hoạt động + tóm tắt LLM
+
+QUAN TRỌNG - XÁC THỰC:
+Khi gọi activity_search hoặc activity_search_with_summary, BẮT BUỘC phải truyền:
+- user_role: "{user_role}"
+- user_id: {user_id}
+- bearer_token: "{bearer_token}"
+
+QUAN TRỌNG - XỬ LÝ KẾT QUẢ RỖNG:
+- Nếu tool trả về total=0 hoặc activities_raw=[], KHÔNG GỌI LẠI TOOL
+- Chỉ gọi MỘT TOOL activity duy nhất cho mỗi câu hỏi
+- Nếu không tìm thấy hoạt động, trả lời: "Hiện tại không có hoạt động nào phù hợp"
+- KHÔNG suy đoán hoặc hallucinate dữ liệu hoạt động
+
+Ví dụ:
+activity_search_with_summary(user_role="{user_role}", user_id={user_id}, bearer_token="{bearer_token}", status="upcoming")
+
+NẾU TOOL TRẢ VỀ 0 KẾT QUẢ:
+→ DỪNG GỌI THÊM TOOL
+→ Trả lời trực tiếp: "Hiện tại không có hoạt động nào phù hợp với yêu cầu của bạn"
 """
-        valid_messages.insert(0, SystemMessage(content=system_prompt))
-        logger.info("Đã thêm system prompt mặc định.")
-    
-    logger.debug(f"Valid messages sent to model: {[msg.model_dump() for msg in valid_messages]}")
-    return model.invoke(valid_messages)
-
-# ================== AGENT NODE ==================
-def agent_node(state: AgentState) -> AgentState:
-    messages = state["messages"]
-    if not messages or not isinstance(messages[-1], HumanMessage) or not messages[-1].content.strip():
-        return {"messages": [AIMessage(content="Vui lòng nhập câu hỏi hợp lệ.")]}
-
-    last_message = messages[-1].content.lower().strip()
-    if last_message in ["chào", "hi", "hello", "chào bạn"]:
-        direct_response = DirectResponse(
-            message="Chào bạn! Hãy hỏi tôi về bất kỳ thông tin nào, tôi sẽ giúp ngay!",
-            search_type="direct"
-        )
-        return {"messages": [AIMessage(content=json.dumps(direct_response.model_dump(), ensure_ascii=False))]}
-
-    cleaned_messages = [msg for msg in messages if not isinstance(msg, ToolMessage)]
-    logger.debug(f"Cleaned messages sent to model: {[msg.model_dump() for msg in cleaned_messages]}")
-    try:
-        response = invoke_model(model, cleaned_messages)
+        
+        full_messages = [SystemMessage(content=system_context)] + messages
+        response = llm_with_tools.invoke(full_messages)
+        
         return {"messages": [response]}
-    except Exception as e:
-        logger.error(f"Lỗi khi gọi model: {str(e)}", exc_info=True)
-        return {"messages": [AIMessage(content=f"Lỗi khi gọi model: {str(e)}")]}
+    
+    return agent
 
-# ================== TOOL NODE ==================
-def tool_node(state: AgentState) -> AgentState:
-    last_message = state["messages"][-1]
-    tool_calls = getattr(last_message, "tool_calls", []) or []
-    tool_messages = []
 
-    for tool_call in tool_calls:
-        tool_name = tool_call["name"]
-        tool_args = tool_call["args"]
-
-        if tool_name == "vector_rag_search":
-            
-            if "query" not in tool_args:
-                for msg in reversed(state["messages"]):
-                    if isinstance(msg, HumanMessage):
-                        tool_args["query"] = msg.content
-                        break
-            tool_func = rag_search_tool
-        else:
-            error_response = DirectResponse(
-                message=f"Tool không hỗ trợ: {tool_name}",
-                search_type="direct"
-            )
-            tool_messages.append(
-                ToolMessage(
-                    content=json.dumps(error_response.model_dump(), ensure_ascii=False),
-                    tool_call_id=tool_call["id"]
-                )
-            )
-            continue
-
-        try:
-            result = tool_func.invoke(tool_args)
-            if hasattr(result, "model_dump"):
-                result = result.model_dump()
-            logger.debug(f"Raw tool result: {result}")
-
-            if isinstance(result, dict) and "llm_response" in result:
-                answer = result["llm_response"]
-            elif isinstance(result, dict) and "natural_response" in result:
-                answer = result["natural_response"]
-            else:
-                answer = str(result)
-
-            rag_response = RAGResponse(answer=answer, search_type="rag")
-            content = json.dumps(rag_response.model_dump(), ensure_ascii=False)
-
-            logger.info(f"Tool {tool_name} formatted response: {content[:200]}...")
-            tool_messages.append(ToolMessage(content=content, tool_call_id=tool_call["id"]))
-
-        except Exception as e:
-            logger.error(f"Lỗi tool {tool_name}: {str(e)}")
-            error_response = DirectResponse(
-                message=f"Lỗi tool {tool_name}: {str(e)}",
-                search_type="direct"
-            )
-            tool_messages.append(
-                ToolMessage(
-                    content=json.dumps(error_response.model_dump(), ensure_ascii=False),
-                    tool_call_id=tool_call["id"]
-                )
-            )
-
-    return {"messages": tool_messages}
-
-# ================== WORKFLOW ==================
-def should_continue(state: AgentState) -> str:
-    last_message = state["messages"][-1]
-    if isinstance(last_message, AIMessage) and last_message.tool_calls:
+def should_continue(state: AgentState):
+    messages = state["messages"]
+    last_message = messages[-1]
+    
+    if hasattr(last_message, 'tool_calls') and last_message.tool_calls:
         return "tools"
+    
     return END
 
-workflow = StateGraph(AgentState)
-workflow.add_node("agent", agent_node)
-workflow.add_node("tools", tool_node)
-workflow.set_entry_point("agent")
-workflow.add_conditional_edges("agent", should_continue, {"tools": "tools", END: END})
-workflow.add_edge("tools", END)
 
-graph = workflow.compile(checkpointer=memory)
-
-# ================== MAIN HANDLER ==================
-def process_query(query: str, thread_id: str = None) -> str:
-    if not query.strip():
-        response = Response(
-            status="error",
-            data=None,
-            error="Vui lòng nhập câu hỏi hợp lệ.",
-            thread_id=thread_id
-        )
-        return json.dumps(response.model_dump(), ensure_ascii=False)
-
-    if thread_id is None:
-        thread_id = str(uuid.uuid4())
-
-    config = {"configurable": {"thread_id": thread_id}}
-    input_msg = HumanMessage(content=query)
-
-    try:
-        current_state = graph.get_state(config)
-        if current_state.values and "messages" in current_state.values:
-            messages = current_state.values["messages"]
-        else:
-            messages = []
-    except Exception as e:
-        logger.warning(f"Không thể lấy state hiện tại: {e}. Bắt đầu mới.")
-        messages = []
-
-    state = {"messages": messages + [input_msg]}
-
-    try:
-        final_messages = []
-        for step in graph.stream(state, config, stream_mode="values"):
-            if "messages" in step:
-                final_messages = step["messages"]
-                logger.debug(f"Step messages: {[type(msg).__name__ for msg in final_messages[-3:]]}")
-
-        response_data = None
-
-        if final_messages:
-            for msg in reversed(final_messages):
-                if isinstance(msg, ToolMessage) and msg.content:
-                    try:
-                        tool_data = json.loads(msg.content)
-                        search_type = tool_data.get("search_type", "direct")
-                        if search_type == "rag":
-                            response_data = RAGResponse(
-                                answer=tool_data.get("answer", ""),
-                                search_type="rag"
-                            )
-                        else:
-                            response_data = DirectResponse(
-                                message=tool_data.get("message", str(tool_data)),
-                                search_type="direct"
-                            )
-                        break
-                    except json.JSONDecodeError:
-                        response_data = DirectResponse(
-                            message=msg.content,
-                            search_type="direct"
-                        )
-                        break
-
-                elif isinstance(msg, AIMessage) and msg.content:
-                    try:
-                        ai_data = json.loads(msg.content)
-                        search_type = ai_data.get("search_type", "direct")
-                        if search_type == "direct":
-                            response_data = DirectResponse(
-                                message=ai_data.get("message", msg.content),
-                                search_type="direct"
-                            )
-                        elif search_type == "rag":
-                            response_data = RAGResponse(
-                                answer=ai_data.get("answer", msg.content),
-                                search_type="rag"
-                            )
-                        else:
-                            response_data = DirectResponse(
-                                message=msg.content,
-                                search_type="direct"
-                            )
-                        break
-                    except json.JSONDecodeError:
-                        response_data = DirectResponse(
-                            message=msg.content,
-                            search_type="direct"
-                        )
-                        break
-
-        if not response_data:
-            response_data = DirectResponse(message="Không có kết quả.", search_type="direct")
-
-        response = Response(status="success", data=response_data, error=None, thread_id=thread_id)
-        return json.dumps(response.model_dump(), ensure_ascii=False)
-
-    except Exception as e:
-        logger.error(f"Lỗi khi xử lý query: {str(e)}", exc_info=True)
-        response = Response(status="error", data=None, error=f"Lỗi khi xử lý: {str(e)}", thread_id=thread_id)
-        return json.dumps(response.model_dump(), ensure_ascii=False)
-
-# ================== CONVERSATION HISTORY ==================
-def get_conversation_history(thread_id: str) -> str:
-    config = {"configurable": {"thread_id": thread_id}}
-    try:
-        state = graph.get_state(config)
-        if state.values and "messages" in state.values:
-            messages = [
-                {
-                    "type": type(msg).__name__,
-                    "content": msg.content if hasattr(msg, "content") else str(msg),
-                    "tool_calls": getattr(msg, "tool_calls", None)
-                }
-                for msg in state.values["messages"]
-            ]
-            response = Response(
-                status="success",
-                data=DirectResponse(message=json.dumps(messages, ensure_ascii=False), search_type="direct"),
-                error=None,
-                thread_id=thread_id
-            )
-        else:
-            response = Response(
-                status="success",
-                data=DirectResponse(message="[]", search_type="direct"),
-                error=None,
-                thread_id=thread_id
-            )
-        return json.dumps(response.model_dump(), ensure_ascii=False)
-    except Exception as e:
-        logger.error(f"Lỗi khi lấy lịch sử: {e}")
-        response = Response(
-            status="error", data=None, error=f"Lỗi khi lấy lịch sử: {str(e)}", thread_id=thread_id
-        )
-        return json.dumps(response.model_dump(), ensure_ascii=False)
-
-def clear_conversation_history(thread_id: str) -> str:
-    config = {"configurable": {"thread_id": thread_id}}
-    try:
-        graph.update_state(config, {"messages": []})
-        response = Response(
-            status="success",
-            data=DirectResponse(message=f"Đã xóa lịch sử cho thread_id: {thread_id}", search_type="direct"),
-            error=None,
-            thread_id=thread_id
-        )
-        return json.dumps(response.model_dump(), ensure_ascii=False)
-    except Exception as e:
-        logger.error(f"Lỗi khi xóa lịch sử: {e}")
-        response = Response(
-            status="error", data=None, error=f"Lỗi khi xóa lịch sử: {str(e)}", thread_id=thread_id
-        )
-        return json.dumps(response.model_dump(), ensure_ascii=False)
-
-def list_all_threads() -> str:
-    logger.warning("MemorySaver không hỗ trợ liệt kê threads. Implement custom storage nếu cần.")
-    response = Response(
-        status="success",
-        data=DirectResponse(message="MemorySaver không hỗ trợ liệt kê threads.", search_type="direct"),
-        error=None,
-        thread_id=None
+def create_langgraph():
+    llm = ChatGoogleGenerativeAI(
+        model="gemini-2.5-flash",
+        google_api_key=os.getenv('GOOGLE_API_KEY'),
+        temperature=0.3
     )
-    return json.dumps(response.model_dump(), ensure_ascii=False)
+    
+    tools = [
+        rag_search_tool,
+        activity_search_tool,
+        activity_search_with_llm_tool
+    ]
+    
+    llm_with_tools = llm.bind_tools(tools)
+    
+    workflow = StateGraph(AgentState)
+    
+    workflow.add_node("agent", create_agent_node(llm_with_tools))
+    workflow.add_node("tools", ToolNode(tools))
+    
+    workflow.set_entry_point("agent")
+    workflow.add_conditional_edges(
+        "agent",
+        should_continue,
+        {"tools": "tools", END: END}
+    )
+    workflow.add_edge("tools", "agent")
+    
+    memory = MemorySaver()
+    return workflow.compile(checkpointer=memory)
+
+
+graph = create_langgraph()
+
+
+def process_query(
+    query: str,
+    user_role: str = "student",
+    user_id: int = 0,
+    bearer_token: str = None,
+    thread_id: str | None = None
+) -> str:
+    try:
+        if not bearer_token:
+            logger.warning("[PROCESS] Không có bearer token")
+        else:
+            logger.info(f"[PROCESS] Token: {bearer_token[:30]}...")
+        
+        config = {"configurable": {"thread_id": thread_id or "default"}}
+        
+        initial_state = {
+            "messages": [HumanMessage(content=query)],
+            "user_role": user_role,
+            "user_id": user_id,
+            "bearer_token": bearer_token or ""
+        }
+        
+        result = graph.invoke(initial_state, config)
+        
+        messages = result.get("messages", [])
+        if not messages:
+            return json.dumps({
+                "status": "error",
+                "data": None,
+                "error": "Không có phản hồi",
+                "thread_id": thread_id
+            }, ensure_ascii=False, indent=2)
+        
+        # LOG TẤT CẢ MESSAGES ĐỂ DEBUG
+        logger.info(f"[DEBUG] Tổng số messages: {len(messages)}")
+        for i, msg in enumerate(messages):
+            msg_type = type(msg).__name__
+            logger.info(f"[DEBUG] Message {i}: {msg_type}")
+            if isinstance(msg, ToolMessage):
+                logger.info(f"[DEBUG]   - Tool: {msg.name if hasattr(msg, 'name') else 'unknown'}")
+                logger.info(f"[DEBUG]   - Nội dung xem trước: {str(msg.content)[:200]}")
+        
+        last_message = messages[-1]
+        
+        # TRÍCH XUẤT TEXT PHẢN HỒI
+        response_text = last_message.content if hasattr(last_message, 'content') else str(last_message)
+        
+        # TRÍCH XUẤT KẾT QUẢ TOOL TỪ ToolMessage
+        activities_raw = []
+        source = "general"
+        total_activities = 0
+        
+        # Tìm kiếm ToolMessage trong messages - LẤY TOOL MESSAGE CUỐI CÙNG
+        tool_messages = [msg for msg in messages if isinstance(msg, ToolMessage)]
+        logger.info(f"[DEBUG] Tìm thấy {len(tool_messages)} tool messages")
+        
+        if tool_messages:
+            # LẤY TOOL MESSAGE CUỐI CÙNG (mới nhất)
+            last_tool_msg = tool_messages[-1]
+            logger.info(f"[DEBUG] Sử dụng tool message cuối cùng: {last_tool_msg.name if hasattr(last_tool_msg, 'name') else 'unknown'}")
+            
+            try:
+                tool_result = json.loads(last_tool_msg.content) if isinstance(last_tool_msg.content, str) else last_tool_msg.content
+                
+                logger.info(f"[EXTRACT] Kết quả tool: {tool_result}")
+                
+                # Kiểm tra nếu là activity tool
+                if isinstance(tool_result, dict):
+                    if tool_result.get('source') == 'activity':
+                        activities_raw = tool_result.get('activities_raw', [])
+                        total_activities = tool_result.get('total', 0)
+                        source = 'activity'
+                        logger.info(f"[EXTRACT] Tìm thấy {total_activities} hoạt động")
+                    elif tool_result.get('source') == 'rag':
+                        source = 'rag'
+                        logger.info("[EXTRACT] Nguồn là RAG")
+            except Exception as e:
+                logger.error(f"[EXTRACT] Lỗi parse tool message: {e}")
+        
+        logger.info(f"[FINAL] source={source}, activities={len(activities_raw)}, total={total_activities}")
+        
+        return json.dumps({
+            "status": "success",
+            "data": {
+                "response": response_text,
+                "user_role": user_role,
+                "user_id": user_id,
+                "source": source,  # "rag", "activity", hoặc "general"
+                "activities": activities_raw,  # Danh sách hoạt động raw (chỉ có nếu source="activity")
+                "total_activities": total_activities  # Tổng số hoạt động
+            },
+            "error": None,
+            "thread_id": thread_id
+        }, ensure_ascii=False, indent=2)
+        
+    except Exception as e:
+        logger.error(f"[PROCESS] Lỗi: {str(e)}")
+        import traceback
+        logger.error(traceback.format_exc())
+        
+        return json.dumps({
+            "status": "error",
+            "data": None,
+            "error": str(e),
+            "thread_id": thread_id
+        }, ensure_ascii=False, indent=2)
+
+
+def get_conversation_history(thread_id: str) -> list:
+    try:
+        config = {"configurable": {"thread_id": thread_id}}
+        state = graph.get_state(config)
+        return state.values.get("messages", [])
+    except Exception as e:
+        logger.error(f"Lỗi khi lấy lịch sử hội thoại: {e}")
+        return []
+
+
+def clear_conversation_history(thread_id: str) -> bool:
+    try:
+        logger.warning("Xóa lịch sử hội thoại chưa được implement cho MemorySaver")
+        return False
+    except Exception as e:
+        logger.error(f"Lỗi khi xóa lịch sử hội thoại: {e}")
+        return False

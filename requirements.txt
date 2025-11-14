@@ -1,43 +1,62 @@
-fastapi
-uvicorn
-python-dotenv
-pymongo
-langchain
-langchain-community
-langchain-google-genai
-pdfplumber
-pandas
-PyMuPDF
-python-multipart
-Pillow
-faiss-cpu
-pdf2image
-opencv-python
-pytesseract
-python-docx
-openpyxl
-unstructured[xlsx]
-langchain_experimental
+# FastAPI và server
+fastapi==0.115.0
+uvicorn==0.32.0
 
-# fix numpy version
-numpy<2
+# Environment và config
+python-dotenv==1.0.1
 
-# torch CPU
+# Database
+pymongo==4.10.1
+mysql-connector-python==9.1.0
+
+# Redis
+redis==5.2.0
+redisvl==0.6.0
+langchain-redis==0.2.4
+
+# LangChain core
+langchain==0.3.7
+langchain-core==0.3.17
+langchain-community==0.3.7
+langchain-google-genai==2.0.5
+langchain-huggingface==0.1.2
+langchain_experimental==0.3.3
+langgraph==0.2.45
+
+# Pydantic (fix compatibility)
+pydantic==2.10.3
+pydantic-core==2.27.1
+
+# Document processing
+pdfplumber==0.11.4
+PyMuPDF==1.24.13
+python-docx==1.1.2
+python-multipart==0.0.12
+openpyxl==3.1.5
+unstructured[xlsx]==0.16.6
+
+# Image processing
+Pillow==11.0.0
+pdf2image==1.17.0
+opencv-python==4.10.0.84
+pytesseract==0.3.13
+
+# Data processing
+pandas==2.2.3
+numpy==1.26.4
+
+# Vector store
+faiss-cpu==1.9.0
+
+# PyTorch CPU (tối ưu cho inference)
 torch==2.2.0+cpu
 -f https://download.pytorch.org/whl/torch_stable.html
 
-# embeddings
-sentence-transformers
-langchain-huggingface
-PyJWT
+# Embeddings
+sentence-transformers==3.2.1
 
+# Security
+PyJWT==2.9.0
 
-langchain-core>=0.2.0
-langgraph>=0.0.40
-langchain>=0.2.0
-typing-extensions>=4.6.1
-mysql-connector-python
-
-redisvl
-redis
-langchain-redis
+# Type hints
+typing-extensions==4.13.2

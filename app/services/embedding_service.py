@@ -13,7 +13,15 @@ from app.config import Config
 from app.services.file_service import get_file_paths
 from app.services.metadata_service import find_document_info
 from app.services.document_loader import load_new_documents
-from langchain_community.embeddings import HuggingFaceEmbeddings
+
+# FIX 1: Import HuggingFaceEmbeddings từ package mới
+try:
+    from langchain_huggingface import HuggingFaceEmbeddings
+    USING_NEW_LANGCHAIN = True
+except ImportError:
+    from langchain_community.embeddings import HuggingFaceEmbeddings
+    USING_NEW_LANGCHAIN = False
+
 import redis
 import numpy as np
 import json
@@ -23,9 +31,10 @@ logger = logging.getLogger(__name__)
 # Global embedding model cache
 _embedding_model_cache = None
 _embedding_model_lock = None
-
-# Redis connection
 _redis_client = None
+
+# UNIFIED INDEX NAME
+UNIFIED_INDEX_NAME = "unified_documents_index"
 
 try:
     import threading
@@ -37,15 +46,44 @@ except ImportError:
     _embedding_model_lock = DummyLock()
 
 def get_redis_client():
-    """Get Redis client connection"""
+    """Get Redis client connection with proper error handling"""
     global _redis_client
     if _redis_client is None:
-        _redis_client = redis.Redis(
-            host=os.getenv('REDIS_HOST', 'localhost'),
-            port=int(os.getenv('REDIS_PORT', 6379)),
-            db=int(os.getenv('REDIS_DB', 0)),
-            decode_responses=False
-        )
+        try:
+            # FIX 2: Lấy từ environment variables với fallback
+            host = os.getenv('REDIS_HOST', 'localhost')
+            port = int(os.getenv('REDIS_PORT', 6379))
+            db = int(os.getenv('REDIS_DB', 0))
+            password = os.getenv('REDIS_PASSWORD', None)
+            
+            logger.info(f"Connecting to Redis at {host}:{port}/{db}")
+            
+            _redis_client = redis.Redis(
+                host=host,
+                port=port,
+                db=db,
+                password=password,
+                decode_responses=False,
+                socket_connect_timeout=5,  # Timeout 5s
+                socket_timeout=5,
+                retry_on_timeout=True
+            )
+            
+            # Test connection
+            _redis_client.ping()
+            logger.info("Redis connection successful")
+            
+        except redis.exceptions.ConnectionError as e:
+            logger.error(f"Failed to connect to Redis: {e}")
+            logger.error(f"Please check your Redis configuration:")
+            logger.error(f"  - REDIS_HOST={os.getenv('REDIS_HOST', 'localhost')}")
+            logger.error(f"  - REDIS_PORT={os.getenv('REDIS_PORT', '6379')}")
+            logger.error(f"  - Is Redis server running?")
+            raise
+        except Exception as e:
+            logger.error(f"Unexpected error connecting to Redis: {e}")
+            raise
+    
     return _redis_client
 
 def get_redis_url():
@@ -63,6 +101,11 @@ def get_redis_url():
 def _create_embedding_model():
     """Private function to create embedding model with caching"""
     logger.info("Creating new embedding model instance...")
+    
+    if USING_NEW_LANGCHAIN:
+        logger.info("Using new langchain-huggingface package")
+    else:
+        logger.warning("Using deprecated langchain-community. Consider upgrading: pip install -U langchain-huggingface")
     
     model = HuggingFaceEmbeddings(
         model_name="dangvantuan/vietnamese-document-embedding",
@@ -189,20 +232,24 @@ def get_text_splitter(use_semantic: bool = True, semantic_overlap: float = 0.2, 
             chunk_overlap=200
         )
 
-def get_redis_index(index_name: str, embedding_dim: int = 768):
-    """Create or get Redis search index"""
+def get_unified_redis_index(embedding_dim: int = 768):
+    """
+    Tạo hoặc lấy index Redis duy nhất cho toàn bộ hệ thống.
+    With improved error handling.
+    """
     schema = {
         "index": {
-            "name": index_name,
-            "prefix": f"doc:{index_name}",
+            "name": UNIFIED_INDEX_NAME,
+            "prefix": f"doc:{UNIFIED_INDEX_NAME}",
             "storage_type": "hash"
         },
         "fields": [
             {"name": "content", "type": "text"},
             {"name": "doc_id", "type": "tag"},
-            {"name": "filename", "type": "text"},
+            {"name": "filename", "type": "tag"},
             {"name": "uploaded_by", "type": "text"},
             {"name": "created_at", "type": "text"},
+            {"name": "chunk_id", "type": "numeric"},
             {
                 "name": "embedding",
                 "type": "vector",
@@ -218,19 +265,45 @@ def get_redis_index(index_name: str, embedding_dim: int = 768):
     
     try:
         index = SearchIndex.from_dict(schema)
-        # Connect using Redis URL string instead of client object
-        index.connect(get_redis_url())
-        index.create(overwrite=False)
-        logger.info(f"Redis index '{index_name}' created/loaded successfully")
+        redis_url = get_redis_url()
+        
+        logger.info(f"Connecting to Redis for index at: {redis_url.split('@')[-1] if '@' in redis_url else redis_url}")
+        index.connect(redis_url)
+        
+        # Try to create index, nếu đã tồn tại thì skip
+        try:
+            index.create(overwrite=False)
+            logger.info(f"Unified Redis index '{UNIFIED_INDEX_NAME}' created successfully")
+        except Exception as create_error:
+            if "already exists" in str(create_error).lower():
+                logger.info(f"Unified Redis index '{UNIFIED_INDEX_NAME}' already exists")
+            else:
+                raise
+        
         return index
+        
+    except redis.exceptions.ConnectionError as e:
+        logger.error(f"Redis connection error: {e}")
+        logger.error("Please ensure Redis is running and accessible")
+        raise
     except Exception as e:
-        logger.error(f"Error creating Redis index: {e}")
+        logger.error(f"Error creating unified Redis index: {e}")
         raise
 
 def add_to_embedding(file_path: str, metadata, use_semantic_chunking: bool = True, semantic_overlap: float = 0.2):
-    """Add documents to Redis vector database"""
+    """
+    Thêm documents vào unified Redis index.
+    With improved error handling.
+    """
     try:
         logger.info(f"Starting embedding process for: {file_path}")
+        
+        # Kiểm tra Redis connection trước
+        try:
+            redis_client = get_redis_client()
+        except redis.exceptions.ConnectionError as e:
+            logger.error(f"Cannot connect to Redis: {e}")
+            return False
         
         documents = load_new_documents(file_path, metadata)
         if not documents:
@@ -263,20 +336,16 @@ def add_to_embedding(file_path: str, metadata, use_semantic_chunking: bool = Tru
                 logger.warning(f"No chunks created from {file_path}")
                 return False
             
-            # Create Redis index
-            index_name = f"docs_{metadata.filename.replace('.', '_').replace(' ', '_')}"
+            # Sử dụng UNIFIED INDEX
             embedding_dim = len(embedding_model.embed_query("test"))
-            index = get_redis_index(index_name, embedding_dim)
+            index = get_unified_redis_index(embedding_dim)
             
-            # Add chunks to Redis
-            redis_client = get_redis_client()
-            
-            # Get metadata dict to access _id field properly
             metadata_dict = metadata.dict(by_alias=True)
             doc_id = metadata_dict.get('_id', metadata.id if hasattr(metadata, 'id') else '')
             
+            # Thêm chunks vào unified index
             for i, chunk in enumerate(chunks):
-                doc_key = f"doc:{index_name}:{i}"
+                doc_key = f"doc:{UNIFIED_INDEX_NAME}:{doc_id}:{i}"
                 embedding_vector = embedding_model.embed_query(chunk.page_content)
                 
                 redis_client.hset(doc_key, mapping={
@@ -285,12 +354,17 @@ def add_to_embedding(file_path: str, metadata, use_semantic_chunking: bool = Tru
                     "filename": metadata.filename,
                     "uploaded_by": metadata.uploaded_by,
                     "created_at": metadata.createdAt,
+                    "chunk_id": i,
                     "embedding": np.array(embedding_vector, dtype=np.float32).tobytes()
                 })
             
-            logger.info(f"Successfully added {len(chunks)} chunks to Redis index '{index_name}'")
+            logger.info(f"Successfully added {len(chunks)} chunks to unified index for doc_id: {doc_id}")
             return True
             
+    except redis.exceptions.ConnectionError as e:
+        logger.error(f"Redis connection error in add_to_embedding: {e}")
+        logger.error("Please check if Redis server is running")
+        return False
     except Exception as e:
         logger.error(f"Error in add_to_embedding: {e}")
         import traceback
@@ -299,41 +373,38 @@ def add_to_embedding(file_path: str, metadata, use_semantic_chunking: bool = Tru
     finally:
         gc.collect()
 
-def delete_from_redis_index(index_name: str, doc_id: str) -> bool:
-    """Delete documents from Redis index"""
+def delete_from_unified_index(doc_id: str) -> bool:
+    """Xóa tất cả chunks của một document từ unified index"""
     try:
         redis_client = get_redis_client()
         
-        # Find all keys with the doc_id
-        pattern = f"doc:{index_name}:*"
+        pattern = f"doc:{UNIFIED_INDEX_NAME}:{doc_id}:*"
         keys_to_delete = []
         
         for key in redis_client.scan_iter(match=pattern):
-            stored_doc_id = redis_client.hget(key, "doc_id")
-            if stored_doc_id and stored_doc_id.decode('utf-8') == doc_id:
-                keys_to_delete.append(key)
+            keys_to_delete.append(key)
         
         if keys_to_delete:
             redis_client.delete(*keys_to_delete)
-            logger.info(f"Deleted {len(keys_to_delete)} documents with doc_id: {doc_id}")
+            logger.info(f"Deleted {len(keys_to_delete)} chunks for doc_id: {doc_id}")
         else:
-            logger.warning(f"No documents found with doc_id: {doc_id}")
+            logger.warning(f"No chunks found for doc_id: {doc_id}")
         
         return True
         
+    except redis.exceptions.ConnectionError as e:
+        logger.error(f"Redis connection error: {e}")
+        return False
     except Exception as e:
-        logger.error(f"Error deleting from Redis index: {str(e)}")
+        logger.error(f"Error deleting from unified index: {str(e)}")
         return False
 
 def update_document_metadata_in_vector_store(doc_id: str, old_metadata: dict, new_metadata, use_semantic_chunking: bool = True, semantic_overlap: float = 0.2) -> bool:
-    """Update document by re-embedding"""
+    """Update document by re-embedding vào unified index"""
     try:
-        old_filename = old_metadata.get('filename')
-        old_index_name = f"docs_{old_filename.replace('.', '_').replace(' ', '_')}"
-        
-        success = delete_from_redis_index(old_index_name, doc_id)
+        success = delete_from_unified_index(doc_id)
         if not success:
-            return False
+            logger.warning(f"Failed to delete old chunks for doc_id: {doc_id}")
         
         file_path = new_metadata.url
         if os.path.exists(file_path):
@@ -347,25 +418,19 @@ def update_document_metadata_in_vector_store(doc_id: str, old_metadata: dict, ne
         return False
 
 def update_metadata_only(doc_id: str, new_metadata) -> bool:
-    """Update only metadata without re-embedding"""
+    """Update only metadata trong unified index"""
     try:
-        index_name = f"docs_{new_metadata.filename.replace('.', '_').replace(' ', '_')}"
         redis_client = get_redis_client()
         
-        # Get metadata dict for proper field access
-        metadata_dict = new_metadata.dict(by_alias=True)
-        
-        pattern = f"doc:{index_name}:*"
+        pattern = f"doc:{UNIFIED_INDEX_NAME}:{doc_id}:*"
         updated_count = 0
         
         for key in redis_client.scan_iter(match=pattern):
-            stored_doc_id = redis_client.hget(key, "doc_id")
-            if stored_doc_id and stored_doc_id.decode('utf-8') == doc_id:
-                redis_client.hset(key, mapping={
-                    "filename": new_metadata.filename,
-                    "uploaded_by": new_metadata.uploaded_by,
-                })
-                updated_count += 1
+            redis_client.hset(key, mapping={
+                "filename": new_metadata.filename,
+                "uploaded_by": new_metadata.uploaded_by,
+            })
+            updated_count += 1
         
         if updated_count > 0:
             logger.info(f"Updated metadata for {updated_count} chunks of document: {doc_id}")
@@ -374,12 +439,15 @@ def update_metadata_only(doc_id: str, new_metadata) -> bool:
             logger.warning(f"No chunks found for document: {doc_id}")
             return False
             
+    except redis.exceptions.ConnectionError as e:
+        logger.error(f"Redis connection error: {e}")
+        return False
     except Exception as e:
         logger.error(f"Error updating metadata only: {str(e)}")
         return False
 
 def smart_metadata_update(doc_id: str, old_metadata: dict, new_metadata, force_re_embed: bool = False, use_semantic_chunking: bool = True, semantic_overlap: float = 0.2) -> bool:
-    """Smart metadata update with fallback logic"""
+    """Smart metadata update với unified index"""
     try:
         filename_changed = old_metadata.get('filename') != new_metadata.filename
         
@@ -401,10 +469,29 @@ def get_embedding_model_info():
     global _embedding_model_cache
     return {
         "is_cached": _embedding_model_cache is not None,
-        "cache_info": _create_embedding_model.cache_info() if hasattr(_create_embedding_model, 'cache_info') else None
+        "cache_info": _create_embedding_model.cache_info() if hasattr(_create_embedding_model, 'cache_info') else None,
+        "unified_index_name": UNIFIED_INDEX_NAME,
+        "using_new_langchain": USING_NEW_LANGCHAIN
     }
 
 def cleanup_embedding_resources():
     """Cleanup embedding resources on shutdown"""
     logger.info("Cleaning up embedding resources...")
     clear_embedding_model_cache()
+
+def test_redis_connection():
+    """Test Redis connection - useful for debugging"""
+    try:
+        redis_client = get_redis_client()
+        redis_client.ping()
+        logger.info("Redis connection test successful")
+        
+        # Test index existence
+        pattern = f"doc:{UNIFIED_INDEX_NAME}:*"
+        sample_keys = list(redis_client.scan_iter(match=pattern, count=1))
+        logger.info(f"Unified index documents found: {len(sample_keys) > 0}")
+        
+        return True
+    except Exception as e:
+        logger.error(f"Redis connection test failed: {e}")
+        return False
