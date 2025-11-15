@@ -15,13 +15,12 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
-# PYDANTIC MODELS
+# ==================== PYDANTIC MODELS ====================
 
 class ActivitySearchRequest(BaseModel):
-    """Request model cho activity search"""
+    """Request model cho activity search - KHÔNG cần bearer_token ở đây nữa"""
     user_role: Literal['advisor', 'student'] = Field(..., description="Role của user")
     user_id: int = Field(..., description="ID của user")
-    bearer_token: str = Field(..., description="JWT token để gọi Laravel API")
     from_date: Optional[str] = Field(None, description="Lọc từ ngày")
     to_date: Optional[str] = Field(None, description="Lọc đến ngày")
     status: Optional[Literal['upcoming', 'completed', 'cancelled']] = Field(None, description="Trạng thái")
@@ -90,7 +89,7 @@ class ActivitySearchWithLLMResponse(BaseModel):
     error_message: Optional[str] = Field(None)
 
 
-# ACTIVITY SEARCH SERVICE
+# ==================== ACTIVITY SEARCH SERVICE ====================
 
 class ActivitySearchService:
     def __init__(self):
@@ -106,13 +105,11 @@ class ActivitySearchService:
         else:
             self.llm = None
 
-    def search_activities(self, request: ActivitySearchRequest) -> ActivitySearchResponse:
-        """Tìm kiếm hoạt động - lấy token từ request"""
+    def search_activities(self, request: ActivitySearchRequest, bearer_token: str = None) -> ActivitySearchResponse:
+        """Tìm kiếm hoạt động - NHẬN bearer_token RIÊNG"""
         try:
-            bearer_token = request.bearer_token
-            
             if not bearer_token:
-                logger.error("[API] Không có bearer token trong request")
+                logger.error("[API] Không có bearer token được truyền vào service")
                 return ActivitySearchResponse(
                     success=False, 
                     data=[], 
@@ -120,7 +117,7 @@ class ActivitySearchService:
                     error_message="Cần token xác thực"
                 )
             
-            logger.info(f"[API] Sử dụng token từ request: {bearer_token[:30]}...")
+            logger.info(f"[API] Gọi API với token: {bearer_token[:40]}...")
             
             headers = {
                 'Content-Type': 'application/json',
@@ -142,7 +139,7 @@ class ActivitySearchService:
             if request.organizer_unit:
                 params['organizer_unit'] = request.organizer_unit
             
-            logger.info(f"[API] Gọi {self.api_base_url}/activities")
+            logger.info(f"[API] Gọi {self.api_base_url}/activities với params: {params}")
             
             response = requests.get(
                 f"{self.api_base_url}/activities",
@@ -151,12 +148,15 @@ class ActivitySearchService:
                 timeout=30
             )
             
-            logger.info(f"[API] Trạng thái response: {response.status_code}")
+            logger.info(f"[API] Response status: {response.status_code}")
+            logger.info(f"[API] Response headers: {dict(response.headers)}")
             
             if response.status_code == 401:
+                error_detail = response.text[:200]
+                logger.error(f"[API] 401 - Token không hợp lệ. Response: {error_detail}")
                 return ActivitySearchResponse(
                     success=False, data=[], total=0,
-                    error_message="Token không hợp lệ"
+                    error_message="Token không hợp lệ hoặc đã hết hạn"
                 )
             
             if response.status_code == 403:
@@ -166,7 +166,14 @@ class ActivitySearchService:
                 )
             
             if response.status_code == 200:
-                data = response.json()
+                try:
+                    data = response.json()
+                except Exception as e:
+                    logger.error(f"[API] Lỗi parse JSON: {e}")
+                    return ActivitySearchResponse(
+                        success=False, data=[], total=0,
+                        error_message="Phản hồi không phải JSON"
+                    )
                 
                 if data.get('success'):
                     activities_data = data.get('data', [])
@@ -197,7 +204,7 @@ class ActivitySearchService:
             else:
                 return ActivitySearchResponse(
                     success=False, data=[], total=0,
-                    error_message=f'HTTP {response.status_code}'
+                    error_message=f'HTTP {response.status_code}: {response.text[:100]}'
                 )
                 
         except requests.exceptions.Timeout:
@@ -214,13 +221,11 @@ class ActivitySearchService:
                 error_message="Lỗi hệ thống"
             )
 
-    def search_with_llm(self, request: ActivitySearchRequest) -> ActivitySearchWithLLMResponse:
-        """
-        Tìm kiếm với LLM - QUAN TRỌNG: Phải truyền đầy đủ request object
-        """
+    def search_with_llm(self, request: ActivitySearchRequest, bearer_token: str = None) -> ActivitySearchWithLLMResponse:
+        """Tìm kiếm với LLM - NHẬN bearer_token RIÊNG"""
         try:
-            # GỌI search_activities với TOÀN BỘ request object (có token)
-            search_result = self.search_activities(request)
+            # GỌI search_activities với bearer_token riêng
+            search_result = self.search_activities(request, bearer_token)
             
             if not search_result.success:
                 return ActivitySearchWithLLMResponse(
@@ -236,14 +241,14 @@ class ActivitySearchService:
             if not search_result.data:
                 return ActivitySearchWithLLMResponse(
                     success=True,
-                    llm_response="Không tìm thấy hoạt động nào phù hợp",
+                    llm_response="Hiện tại không có hoạt động nào phù hợp với yêu cầu của bạn.",
                     activities=[], 
                     activities_raw=[], 
                     total=0,
                     source="activity"
                 )
             
-            llm_response = "Không thể tạo tóm tắt"
+            llm_response = "Không thể tạo tóm tắt do lỗi LLM."
             
             if self.llm and search_result.data:
                 try:
@@ -335,6 +340,7 @@ Sử dụng markdown để format rõ ràng với **bold** cho tiêu đề và b
                     
                 except Exception as e:
                     logger.error(f"[LLM] Lỗi: {e}")
+                    llm_response = "Không thể tạo tóm tắt do lỗi hệ thống."
             
             return ActivitySearchWithLLMResponse(
                 success=True,
@@ -359,64 +365,67 @@ Sử dụng markdown để format rõ ràng với **bold** cho tiêu đề và b
             )
 
 
-# INITIALIZE SERVICE
+# ==================== INITIALIZE SERVICE ====================
 
 activity_search_service = ActivitySearchService()
 
 
-# WRAPPER FUNCTIONS ĐỂ TRẢ VỀ STRUCTURED DATA
+# ==================== WRAPPER FUNCTIONS ====================
 
-def activity_search_wrapper(user_role, user_id, bearer_token, from_date=None, to_date=None, status=None, title=None, point_type=None, organizer_unit=None):
-    """Wrapper trả về dict thay vì object"""
-    logger.info(f"[WRAPPER] activity_search được gọi với token: {bearer_token[:30] if bearer_token else 'None'}...")
+def activity_search_wrapper(
+    user_role, user_id, bearer_token, 
+    from_date=None, to_date=None, status=None, title=None, point_type=None, organizer_unit=None
+):
+    """Wrapper trả về dict - TRUYỀN bearer_token RIÊNG"""
+    logger.info(f"[WRAPPER] activity_search gọi với token: {bearer_token[:40] if bearer_token else 'None'}...")
     
-    result = activity_search_service.search_activities(
-        ActivitySearchRequest(
-            user_role=user_role,
-            user_id=user_id,
-            bearer_token=bearer_token,
-            from_date=from_date,
-            to_date=to_date,
-            status=status,
-            title=title,
-            point_type=point_type,
-            organizer_unit=organizer_unit
-        )
+    request = ActivitySearchRequest(
+        user_role=user_role,
+        user_id=user_id,
+        from_date=from_date,
+        to_date=to_date,
+        status=status,
+        title=title,
+        point_type=point_type,
+        organizer_unit=organizer_unit
     )
     
-    # Trả về dict để LLM có thể đọc
+    # TRUYỀN bearer_token RIÊNG
+    result = activity_search_service.search_activities(request, bearer_token=bearer_token)
+    
     output = {
         "success": result.success,
         "total": result.total,
         "source": "activity",
         "activities_raw": result.activities_raw if result.activities_raw else [],
-        "summary": f"Tìm thấy {result.total} hoạt động" if result.success else result.error_message
+        "summary": f"Tìm thấy {result.total} hoạt động" if result.success else (result.error_message or "Lỗi tìm kiếm")
     }
     
-    logger.info(f"[WRAPPER] Trả về {result.total} hoạt động, độ dài raw data: {len(result.activities_raw) if result.activities_raw else 0}")
-    
+    logger.info(f"[WRAPPER] Trả về {result.total} hoạt động")
     return output
 
 
-def activity_search_with_llm_wrapper(user_role, user_id, bearer_token, from_date=None, to_date=None, status=None, title=None, point_type=None, organizer_unit=None):
+def activity_search_with_llm_wrapper(
+    user_role, user_id, bearer_token, 
+    from_date=None, to_date=None, status=None, title=None, point_type=None, organizer_unit=None
+):
     """Wrapper trả về dict với LLM response"""
-    logger.info(f"[WRAPPER] activity_search_with_llm được gọi với token: {bearer_token[:30] if bearer_token else 'None'}...")
+    logger.info(f"[WRAPPER] activity_search_with_llm gọi với token: {bearer_token[:40] if bearer_token else 'None'}...")
     
-    result = activity_search_service.search_with_llm(
-        ActivitySearchRequest(
-            user_role=user_role,
-            user_id=user_id,
-            bearer_token=bearer_token,
-            from_date=from_date,
-            to_date=to_date,
-            status=status,
-            title=title,
-            point_type=point_type,
-            organizer_unit=organizer_unit
-        )
+    request = ActivitySearchRequest(
+        user_role=user_role,
+        user_id=user_id,
+        from_date=from_date,
+        to_date=to_date,
+        status=status,
+        title=title,
+        point_type=point_type,
+        organizer_unit=organizer_unit
     )
     
-    # Trả về dict structured
+    # TRUYỀN bearer_token RIÊNG
+    result = activity_search_service.search_with_llm(request, bearer_token=bearer_token)
+    
     output = {
         "success": result.success,
         "llm_response": result.llm_response,
@@ -427,11 +436,10 @@ def activity_search_with_llm_wrapper(user_role, user_id, bearer_token, from_date
     }
     
     logger.info(f"[WRAPPER] Trả về LLM response với {result.total} hoạt động")
-    
     return output
 
 
-# LANGCHAIN TOOLS - SỬ DỤNG WRAPPER
+# ==================== LANGCHAIN TOOLS ====================
 
 activity_search_tool = StructuredTool.from_function(
     func=activity_search_wrapper,

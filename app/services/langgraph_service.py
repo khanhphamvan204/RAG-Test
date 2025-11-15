@@ -9,6 +9,7 @@ import logging
 import json
 from dotenv import load_dotenv
 import os
+from datetime import datetime
 
 from app.services.rag_service import rag_search_tool
 from app.services.activity_search_service import (
@@ -35,8 +36,18 @@ def create_agent_node(llm_with_tools):
         user_id = state.get("user_id", 0)
         bearer_token = state.get("bearer_token", "")
         
+        # Lấy ngày giờ hiện tại
+        current_datetime = datetime.now()
+        current_date_str = current_datetime.strftime("%d/%m/%Y")
+        current_time_str = current_datetime.strftime("%H:%M:%S")
+        current_weekday = ["Thứ Hai", "Thứ Ba", "Thứ Tư", "Thứ Năm", "Thứ Sáu", "Thứ Bảy", "Chủ Nhật"][current_datetime.weekday()]
+        
         system_context = f"""
 Bạn là trợ lý AI cho hệ thống quản lý cố vấn học tập.
+
+THÔNG TIN THỜI GIAN HIỆN TẠI:
+- Ngày hiện tại: {current_weekday}, {current_date_str}
+- Giờ hiện tại: {current_time_str}
 
 Người dùng hiện tại:
 - Vai trò: {user_role}
