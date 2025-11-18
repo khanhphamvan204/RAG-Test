@@ -1,3 +1,5 @@
+# ==================== FILE: app/services/langgraph_service.py ====================
+
 from typing import TypedDict, Annotated
 from langgraph.graph import StateGraph, END
 from langgraph.prebuilt import ToolNode
@@ -14,7 +16,8 @@ from datetime import datetime
 from app.services.rag_service import rag_search_tool
 from app.services.activity_search_service import (
     activity_search_tool,
-    activity_search_with_llm_tool
+    activity_search_with_llm_tool,
+    set_bearer_token  # ← IMPORT FUNCTION SET TOKEN
 )
 
 load_dotenv()
@@ -26,7 +29,7 @@ class AgentState(TypedDict):
     messages: Annotated[list, operator.add]
     user_role: str
     user_id: int
-    bearer_token: str
+    bearer_token: str  # Vẫn giữ trong state để tracking
 
 
 def create_agent_node(llm_with_tools):
@@ -34,7 +37,6 @@ def create_agent_node(llm_with_tools):
         messages = state["messages"]
         user_role = state.get("user_role", "student")
         user_id = state.get("user_id", 0)
-        bearer_token = state.get("bearer_token", "")
         
         # Lấy ngày giờ hiện tại
         current_datetime = datetime.now()
@@ -42,6 +44,7 @@ def create_agent_node(llm_with_tools):
         current_time_str = current_datetime.strftime("%H:%M:%S")
         current_weekday = ["Thứ Hai", "Thứ Ba", "Thứ Tư", "Thứ Năm", "Thứ Sáu", "Thứ Bảy", "Chủ Nhật"][current_datetime.weekday()]
         
+        # ĐÃ BỎ HOÀN TOÀN instruction về bearer_token
         system_context = f"""
 Bạn là trợ lý AI cho hệ thống quản lý cố vấn học tập.
 
@@ -52,31 +55,41 @@ THÔNG TIN THỜI GIAN HIỆN TẠI:
 Người dùng hiện tại:
 - Vai trò: {user_role}
 - ID: {user_id}
-- Bearer token: ĐÃ ĐƯỢC CUNG CẤP
 
 Công cụ có sẵn:
-1. vector_rag_search - Tìm tài liệu
-2. activity_search - Tìm hoạt động (dữ liệu thô)
-3. activity_search_with_summary - Tìm hoạt động + tóm tắt LLM
+1. **vector_rag_search** - Tìm kiếm tài liệu trong hệ thống
+2. **activity_search** - Tìm kiếm hoạt động ngoại khóa (dữ liệu thô)
+3. **activity_search_with_summary** - Tìm kiếm hoạt động + tóm tắt LLM
 
-QUAN TRỌNG - XÁC THỰC:
-Khi gọi activity_search hoặc activity_search_with_summary, BẮT BUỘC phải truyền:
-- user_role: "{user_role}"
-- user_id: {user_id}
-- bearer_token: "{bearer_token}"
+HƯỚNG DẪN SỬ DỤNG TOOLS:
 
-QUAN TRỌNG - XỬ LÝ KẾT QUẢ RỖNG:
-- Nếu tool trả về total=0 hoặc activities_raw=[], KHÔNG GỌI LẠI TOOL
+📚 **vector_rag_search**: Dùng khi user hỏi về:
+- Quy định, quy trình, nội quy
+- Tài liệu hướng dẫn
+- Thông tin chung về hệ thống
+
+🎯 **activity_search**: Dùng khi cần dữ liệu thô về hoạt động:
+- Liệt kê tất cả hoạt động
+- Export/báo cáo
+- Xử lý dữ liệu phức tạp
+
+✨ **activity_search_with_summary**: Dùng khi user hỏi về hoạt động:
+- "Có hoạt động gì sắp tới?"
+- "Tìm hoạt động CTXH"
+- "Hoạt động nào cho điểm rèn luyện?"
+
+CÁCH GỌI TOOL ACTIVITY:
+activity_search_with_summary(
+    user_role="{user_role}",
+    user_id={user_id},
+    status="upcoming"  # hoặc các filter khác
+)
+
+LƯU Ý QUAN TRỌNG:
+- KHÔNG BAO GIỜ truyền bearer_token vào tool call (hệ thống tự động xử lý)
 - Chỉ gọi MỘT TOOL activity duy nhất cho mỗi câu hỏi
-- Nếu không tìm thấy hoạt động, trả lời: "Hiện tại không có hoạt động nào phù hợp"
-- KHÔNG suy đoán hoặc hallucinate dữ liệu hoạt động
-
-Ví dụ:
-activity_search_with_summary(user_role="{user_role}", user_id={user_id}, bearer_token="{bearer_token}", status="upcoming")
-
-NẾU TOOL TRẢ VỀ 0 KẾT QUẢ:
-→ DỪNG GỌI THÊM TOOL
-→ Trả lời trực tiếp: "Hiện tại không có hoạt động nào phù hợp với yêu cầu của bạn"
+- Nếu tool trả về total=0, DỪNG và trả lời "Không có hoạt động phù hợp"
+- KHÔNG suy đoán hoặc tự tạo dữ liệu hoạt động
 """
         
         full_messages = [SystemMessage(content=system_context)] + messages
@@ -139,11 +152,16 @@ def process_query(
     bearer_token: str = None,
     thread_id: str | None = None
 ) -> str:
+    """
+    Process query - TỰ ĐỘNG INJECT TOKEN trước khi tools được gọi
+    """
     try:
-        if not bearer_token:
-            logger.warning("[PROCESS] Không có bearer token")
+        # SET TOKEN GLOBAL NGAY TỪ ĐẦU
+        if bearer_token:
+            set_bearer_token(bearer_token)
+            logger.info(f"[PROCESS] Token đã được set global: {bearer_token[:30]}...")
         else:
-            logger.info(f"[PROCESS] Token: {bearer_token[:30]}...")
+            logger.warning("[PROCESS] Không có bearer token - tools sẽ fail!")
         
         config = {"configurable": {"thread_id": thread_id or "default"}}
         
@@ -151,7 +169,7 @@ def process_query(
             "messages": [HumanMessage(content=query)],
             "user_role": user_role,
             "user_id": user_id,
-            "bearer_token": bearer_token or ""
+            "bearer_token": bearer_token or ""  # Vẫn lưu để tracking
         }
         
         result = graph.invoke(initial_state, config)
@@ -165,40 +183,26 @@ def process_query(
                 "thread_id": thread_id
             }, ensure_ascii=False, indent=2)
         
-        # LOG TẤT CẢ MESSAGES ĐỂ DEBUG
-        logger.info(f"[DEBUG] Tổng số messages: {len(messages)}")
-        for i, msg in enumerate(messages):
-            msg_type = type(msg).__name__
-            logger.info(f"[DEBUG] Message {i}: {msg_type}")
-            if isinstance(msg, ToolMessage):
-                logger.info(f"[DEBUG]   - Tool: {msg.name if hasattr(msg, 'name') else 'unknown'}")
-                logger.info(f"[DEBUG]   - Nội dung xem trước: {str(msg.content)[:200]}")
-        
         last_message = messages[-1]
         
         # TRÍCH XUẤT TEXT PHẢN HỒI
         response_text = last_message.content if hasattr(last_message, 'content') else str(last_message)
         
-        # TRÍCH XUẤT KẾT QUẢ TOOL TỪ ToolMessage
+        # TRÍCH XUẤT KẾT QUẢ TOOL
         activities_raw = []
         source = "general"
         total_activities = 0
         
-        # Tìm kiếm ToolMessage trong messages - LẤY TOOL MESSAGE CUỐI CÙNG
         tool_messages = [msg for msg in messages if isinstance(msg, ToolMessage)]
         logger.info(f"[DEBUG] Tìm thấy {len(tool_messages)} tool messages")
         
         if tool_messages:
-            # LẤY TOOL MESSAGE CUỐI CÙNG (mới nhất)
             last_tool_msg = tool_messages[-1]
-            logger.info(f"[DEBUG] Sử dụng tool message cuối cùng: {last_tool_msg.name if hasattr(last_tool_msg, 'name') else 'unknown'}")
+            logger.info(f"[DEBUG] Tool message cuối: {last_tool_msg.name if hasattr(last_tool_msg, 'name') else 'unknown'}")
             
             try:
                 tool_result = json.loads(last_tool_msg.content) if isinstance(last_tool_msg.content, str) else last_tool_msg.content
                 
-                logger.info(f"[EXTRACT] Kết quả tool: {tool_result}")
-                
-                # Kiểm tra nếu là activity tool
                 if isinstance(tool_result, dict):
                     if tool_result.get('source') == 'activity':
                         activities_raw = tool_result.get('activities_raw', [])
@@ -211,17 +215,15 @@ def process_query(
             except Exception as e:
                 logger.error(f"[EXTRACT] Lỗi parse tool message: {e}")
         
-        logger.info(f"[FINAL] source={source}, activities={len(activities_raw)}, total={total_activities}")
-        
         return json.dumps({
             "status": "success",
             "data": {
                 "response": response_text,
                 "user_role": user_role,
                 "user_id": user_id,
-                "source": source,  # "rag", "activity", hoặc "general"
-                "activities": activities_raw,  # Danh sách hoạt động raw (chỉ có nếu source="activity")
-                "total_activities": total_activities  # Tổng số hoạt động
+                "source": source,
+                "activities": activities_raw,
+                "total_activities": total_activities
             },
             "error": None,
             "thread_id": thread_id

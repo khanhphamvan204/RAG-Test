@@ -1,3 +1,5 @@
+# ==================== FILE: app/services/activity_search_service.py ====================
+
 from pydantic import BaseModel, Field
 from typing import List, Optional, Literal
 from datetime import datetime
@@ -18,7 +20,7 @@ logger = logging.getLogger(__name__)
 # ==================== PYDANTIC MODELS ====================
 
 class ActivitySearchRequest(BaseModel):
-    """Request model cho activity search - KHÔNG cần bearer_token ở đây nữa"""
+    """Request model cho activity search - KHÔNG CÓ bearer_token"""
     user_role: Literal['advisor', 'student'] = Field(..., description="Role của user")
     user_id: int = Field(..., description="ID của user")
     from_date: Optional[str] = Field(None, description="Lọc từ ngày")
@@ -105,16 +107,16 @@ class ActivitySearchService:
         else:
             self.llm = None
 
-    def search_activities(self, request: ActivitySearchRequest, bearer_token: str = None) -> ActivitySearchResponse:
-        """Tìm kiếm hoạt động - NHẬN bearer_token RIÊNG"""
+    def search_activities(self, request: ActivitySearchRequest, bearer_token: str) -> ActivitySearchResponse:
+        """Tìm kiếm hoạt động - bearer_token là REQUIRED parameter"""
         try:
             if not bearer_token:
-                logger.error("[API] Không có bearer token được truyền vào service")
+                logger.error("[API] Token không được cung cấp")
                 return ActivitySearchResponse(
                     success=False, 
                     data=[], 
                     total=0,
-                    error_message="Cần token xác thực"
+                    error_message="Token xác thực không được cung cấp"
                 )
             
             logger.info(f"[API] Gọi API với token: {bearer_token[:40]}...")
@@ -149,7 +151,6 @@ class ActivitySearchService:
             )
             
             logger.info(f"[API] Response status: {response.status_code}")
-            logger.info(f"[API] Response headers: {dict(response.headers)}")
             
             if response.status_code == 401:
                 error_detail = response.text[:200]
@@ -166,14 +167,7 @@ class ActivitySearchService:
                 )
             
             if response.status_code == 200:
-                try:
-                    data = response.json()
-                except Exception as e:
-                    logger.error(f"[API] Lỗi parse JSON: {e}")
-                    return ActivitySearchResponse(
-                        success=False, data=[], total=0,
-                        error_message="Phản hồi không phải JSON"
-                    )
+                data = response.json()
                 
                 if data.get('success'):
                     activities_data = data.get('data', [])
@@ -221,10 +215,9 @@ class ActivitySearchService:
                 error_message="Lỗi hệ thống"
             )
 
-    def search_with_llm(self, request: ActivitySearchRequest, bearer_token: str = None) -> ActivitySearchWithLLMResponse:
-        """Tìm kiếm với LLM - NHẬN bearer_token RIÊNG"""
+    def search_with_llm(self, request: ActivitySearchRequest, bearer_token: str) -> ActivitySearchWithLLMResponse:
+        """Tìm kiếm với LLM"""
         try:
-            # GỌI search_activities với bearer_token riêng
             search_result = self.search_activities(request, bearer_token)
             
             if not search_result.success:
@@ -365,19 +358,50 @@ Sử dụng markdown để format rõ ràng với **bold** cho tiêu đề và b
             )
 
 
-# ==================== INITIALIZE SERVICE ====================
+# ==================== GLOBAL SERVICE INSTANCE ====================
 
 activity_search_service = ActivitySearchService()
 
 
-# ==================== WRAPPER FUNCTIONS ====================
+# ==================== WRAPPER FUNCTIONS WITH AUTO-INJECTED TOKEN ====================
+
+# BIẾN GLOBAL để lưu token - sẽ được set từ bên ngoài
+_current_bearer_token: Optional[str] = None
+
+def set_bearer_token(token: str):
+    """Set token globally để wrapper có thể dùng"""
+    global _current_bearer_token
+    _current_bearer_token = token
+    logger.info(f"[TOKEN] Bearer token đã được set: {token[:40] if token else 'None'}...")
+
 
 def activity_search_wrapper(
-    user_role, user_id, bearer_token, 
-    from_date=None, to_date=None, status=None, title=None, point_type=None, organizer_unit=None
+    user_role, 
+    user_id, 
+    from_date=None, 
+    to_date=None, 
+    status=None, 
+    title=None, 
+    point_type=None, 
+    organizer_unit=None
 ):
-    """Wrapper trả về dict - TRUYỀN bearer_token RIÊNG"""
-    logger.info(f"[WRAPPER] activity_search gọi với token: {bearer_token[:40] if bearer_token else 'None'}...")
+    """
+    Wrapper TỰ ĐỘNG INJECT TOKEN từ global variable
+    LLM KHÔNG CẦN truyền bearer_token nữa!
+    """
+    global _current_bearer_token
+    
+    if not _current_bearer_token:
+        logger.error("[WRAPPER] Token chưa được set!")
+        return {
+            "success": False,
+            "total": 0,
+            "source": "activity",
+            "activities_raw": [],
+            "summary": "Lỗi xác thực: Token không được cung cấp"
+        }
+    
+    logger.info(f"[WRAPPER] activity_search với auto-injected token")
     
     request = ActivitySearchRequest(
         user_role=user_role,
@@ -390,8 +414,8 @@ def activity_search_wrapper(
         organizer_unit=organizer_unit
     )
     
-    # TRUYỀN bearer_token RIÊNG
-    result = activity_search_service.search_activities(request, bearer_token=bearer_token)
+    # TỰ ĐỘNG INJECT TOKEN
+    result = activity_search_service.search_activities(request, bearer_token=_current_bearer_token)
     
     output = {
         "success": result.success,
@@ -406,11 +430,32 @@ def activity_search_wrapper(
 
 
 def activity_search_with_llm_wrapper(
-    user_role, user_id, bearer_token, 
-    from_date=None, to_date=None, status=None, title=None, point_type=None, organizer_unit=None
+    user_role, 
+    user_id, 
+    from_date=None, 
+    to_date=None, 
+    status=None, 
+    title=None, 
+    point_type=None, 
+    organizer_unit=None
 ):
-    """Wrapper trả về dict với LLM response"""
-    logger.info(f"[WRAPPER] activity_search_with_llm gọi với token: {bearer_token[:40] if bearer_token else 'None'}...")
+    """
+    Wrapper TỰ ĐỘNG INJECT TOKEN
+    """
+    global _current_bearer_token
+    
+    if not _current_bearer_token:
+        logger.error("[WRAPPER] Token chưa được set!")
+        return {
+            "success": False,
+            "llm_response": "Lỗi xác thực: Token không được cung cấp",
+            "total": 0,
+            "source": "activity",
+            "activities_raw": [],
+            "error_message": "Token không được cung cấp"
+        }
+    
+    logger.info(f"[WRAPPER] activity_search_with_llm với auto-injected token")
     
     request = ActivitySearchRequest(
         user_role=user_role,
@@ -423,8 +468,8 @@ def activity_search_with_llm_wrapper(
         organizer_unit=organizer_unit
     )
     
-    # TRUYỀN bearer_token RIÊNG
-    result = activity_search_service.search_with_llm(request, bearer_token=bearer_token)
+    # TỰ ĐỘNG INJECT TOKEN
+    result = activity_search_service.search_with_llm(request, bearer_token=_current_bearer_token)
     
     output = {
         "success": result.success,
@@ -439,7 +484,7 @@ def activity_search_with_llm_wrapper(
     return output
 
 
-# ==================== LANGCHAIN TOOLS ====================
+# ==================== LANGCHAIN TOOLS (CẬP NHẬT DESCRIPTION) ====================
 
 activity_search_tool = StructuredTool.from_function(
     func=activity_search_wrapper,
@@ -447,18 +492,23 @@ activity_search_tool = StructuredTool.from_function(
     description="""
 Tìm kiếm hoạt động ngoại khóa.
 
+QUAN TRỌNG: Tool này TỰ ĐỘNG sử dụng token xác thực của user hiện tại.
+Bạn KHÔNG CẦN và KHÔNG ĐƯỢC truyền bearer_token.
+
 Parameters:
 - user_role (str, required): "advisor" hoặc "student"
 - user_id (int, required): ID của user
-- bearer_token (str, required): JWT token để xác thực
-- from_date (str, optional): Lọc từ ngày
-- to_date (str, optional): Lọc đến ngày
+- from_date (str, optional): Lọc từ ngày (format: YYYY-MM-DD)
+- to_date (str, optional): Lọc đến ngày (format: YYYY-MM-DD)
 - status (str, optional): "upcoming", "completed", "cancelled"
 - title (str, optional): Tên hoạt động
 - point_type (str, optional): "ctxh" hoặc "ren_luyen"
 - organizer_unit (str, optional): Tên đơn vị
 
 Returns: Dict với activities_raw và metadata
+
+Example usage:
+activity_search(user_role="student", user_id=123, status="upcoming")
 """
 )
 
@@ -468,9 +518,15 @@ activity_search_with_llm_tool = StructuredTool.from_function(
     description="""
 Tìm kiếm hoạt động và tạo tóm tắt bằng LLM.
 
+QUAN TRỌNG: Tool này TỰ ĐỘNG sử dụng token xác thực của user hiện tại.
+Bạn KHÔNG CẦN và KHÔNG ĐƯỢC truyền bearer_token.
+
 Parameters: Giống activity_search
 
 Returns: Dict với llm_response, activities_raw và metadata
+
+Example usage:
+activity_search_with_summary(user_role="student", user_id=123, from_date="2025-03-01")
 """
 )
 
