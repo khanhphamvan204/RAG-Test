@@ -208,9 +208,9 @@ rag_service = RAGSearchService()
 
 # WRAPPER FUNCTION CHO RAG
 
-def rag_search_wrapper(query, k=5, similarity_threshold=0.5):
+def rag_search_wrapper(query, k=5, similarity_threshold=0.3):
     """Wrapper trả về dict cho RAG search"""
-    logger.info(f"[WRAPPER] rag_search được gọi với query: {query[:50]}...")
+    logger.info(f"[WRAPPER] rag_search được gọi với query: {query}...")
     
     result = rag_service.search_with_llm(
         VectorSearchRequest(

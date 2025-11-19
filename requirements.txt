@@ -60,3 +60,6 @@ PyJWT==2.9.0
 
 # Type hints
 typing-extensions==4.13.2
+
+redis 
+langgraph-checkpoint-redis
