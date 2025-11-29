@@ -8,20 +8,15 @@ from redisvl.index import SearchIndex
 from redisvl.query import VectorQuery
 from dotenv import load_dotenv
 from langchain_core.tools import StructuredTool
-import sys
 import numpy as np
-
-root_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '../..'))
-if root_dir not in sys.path:
-    sys.path.insert(0, root_dir)
 
 from app.models.vector_models import VectorSearchRequest
 from app.services.embedding_service import (
     get_embedding_model, 
     get_redis_client, 
-    get_redis_url,
-    UNIFIED_INDEX_NAME
+    get_redis_url
 )
+from app.config import Config
 
 load_dotenv()
 
@@ -35,6 +30,7 @@ def standardization(distance: float) -> float:
 class RAGResponse(BaseModel):
     llm_response: str
     search_type: str = "rag"
+    unit_name: str = ""
 
 class RAGSearchService:
     def __init__(self):
@@ -48,44 +44,49 @@ class RAGSearchService:
         else:
             self.llm = None
 
-    def search_with_llm(self, request: VectorSearchRequest) -> RAGResponse:
+    def search_with_llm(self, request: VectorSearchRequest, unit_name: str = "default_unit") -> RAGResponse:
         """
-        Search trong unified index
+        Search trong unit-specific index
         """
         try:
             embedding_model = get_embedding_model()
             redis_client = get_redis_client()
             redis_url = get_redis_url()
             
-            # Kiểm tra xem có documents trong unified index không
-            pattern = f"doc:{UNIFIED_INDEX_NAME}:*"
-            sample_keys = list(redis_client.scan_iter(match=pattern, count=1))
-            if not sample_keys:
-                logger.warning("Không tìm thấy documents trong unified index")
-                return RAGResponse(
-                    llm_response="Xin lỗi, tôi không tìm thấy thông tin này.", 
-                    search_type="rag"
-                )
+            # Lấy index name của unit
+            index_name = Config.get_unit_index_name(unit_name)
             
-            logger.info(f"Tìm kiếm trong unified index: {UNIFIED_INDEX_NAME}")
+            logger.info(f"[RAG] Searching in unit index: {index_name}")
+            
+            # Kiểm tra documents trong unit index
+            pattern = f"doc:{index_name}:*"
+            sample_keys = list(redis_client.scan_iter(match=pattern, count=1))
+            
+            if not sample_keys:
+                logger.warning(f"No documents found in unit index: {index_name}")
+                return RAGResponse(
+                    llm_response=f"Xin lỗi, không tìm thấy tài liệu nào trong thư viện của đơn vị '{unit_name}'.", 
+                    search_type="rag",
+                    unit_name=unit_name
+                )
             
             # Generate query embedding
             query_embedding = embedding_model.embed_query(request.query)
             query_vector = np.array(query_embedding, dtype=np.float32)
             
-            # Tạo VectorQuery cho unified index
+            # Vector query
             v = VectorQuery(
                 vector=query_vector.tolist(),
                 vector_field_name="embedding",
-                return_fields=["content", "doc_id", "filename", "uploaded_by", "created_at", "chunk_id"],
+                return_fields=["content", "doc_id", "filename", "uploaded_by", "created_at", "chunk_id", "unit_name"],
                 num_results=request.k * 2
             )
             
-            # Schema cho unified index
+            # Schema cho unit index
             schema = {
                 "index": {
-                    "name": UNIFIED_INDEX_NAME,
-                    "prefix": f"doc:{UNIFIED_INDEX_NAME}",
+                    "name": index_name,
+                    "prefix": f"doc:{index_name}",
                     "storage_type": "hash"
                 },
                 "fields": [
@@ -95,6 +96,7 @@ class RAGSearchService:
                     {"name": "uploaded_by", "type": "text"},
                     {"name": "created_at", "type": "text"},
                     {"name": "chunk_id", "type": "numeric"},
+                    {"name": "unit_name", "type": "tag"},
                     {
                         "name": "embedding",
                         "type": "vector",
@@ -126,7 +128,8 @@ class RAGSearchService:
                             "uploaded_by": result.get('uploaded_by', ''),
                             "created_at": result.get('created_at', ''),
                             "chunk_id": result.get('chunk_id', 0),
-                            "similarity_score": similarity
+                            "similarity_score": similarity,
+                            "unit_name": result.get('unit_name', unit_name)
                         }
                     })
             
@@ -134,10 +137,11 @@ class RAGSearchService:
             all_results.sort(key=lambda x: x['metadata']['similarity_score'], reverse=True)
             top_results = all_results[:request.k]
             
-            logger.info(f"Tìm thấy {len(top_results)} kết quả sau khi lọc (ngưỡng: {request.similarity_threshold})")
+            logger.info(f"[RAG] Found {len(top_results)} results in unit '{unit_name}'")
             
             # Generate LLM response
-            llm_response = "Xin lỗi, tôi không tìm thấy thông tin này."
+            llm_response = f"Xin lỗi, không tìm thấy thông tin liên quan trong thư viện của đơn vị '{unit_name}'."
+            
             if top_results:
                 try:
                     llm = ChatGoogleGenerativeAI(
@@ -152,13 +156,13 @@ class RAGSearchService:
                     )
                     
                     prompt_template = PromptTemplate(
-                        input_variables=["query", "context"],
+                        input_variables=["query", "context", "unit_name"],
                         template="""
 🎯 Vai trò:
-Bạn là một trợ lý AI chuyên nghiệp, chỉ trả lời dựa trên thông tin từ **tài liệu được cung cấp**.
+Bạn là trợ lý AI của thư viện đơn vị "{unit_name}", chỉ trả lời dựa trên tài liệu được cung cấp.
 
 📋 Nguyên tắc:
-- Chỉ sử dụng thông tin từ tài liệu
+- Chỉ sử dụng thông tin từ tài liệu của đơn vị "{unit_name}"
 - Không thêm kiến thức bên ngoài
 - Không suy đoán hoặc giả định
 - Nếu không có thông tin: "Xin lỗi, tôi không tìm thấy thông tin liên quan trong tài liệu."
@@ -172,52 +176,82 @@ Bạn là một trợ lý AI chuyên nghiệp, chỉ trả lời dựa trên th�
 - Dùng **số thứ tự** (1., 2., 3.) cho các bước hoặc quy trình
 - Dùng **gạch đầu dòng** (-, *, •) cho danh sách các ý
 - Dùng **bold** cho từ khóa quan trọng
-- Dùng > cho trích dẫn từ tài liệu (nếu cần)
 
-❓ Câu hỏi của người dùng:
+❓ Câu hỏi:
 {query}
 
-📂 Tài liệu tham khảo:
+📂 Tài liệu từ thư viện đơn vị "{unit_name}":
 {context}
 
-Hãy trả lời câu hỏi dựa trên tài liệu trên.
+Hãy trả lời dựa trên tài liệu trên.
 """
                     )
                     
-                    prompt = prompt_template.format(query=request.query, context=context)
+                    prompt = prompt_template.format(
+                        query=request.query, 
+                        context=context,
+                        unit_name=unit_name
+                    )
                     llm_response = llm.invoke(prompt).content
                     
-                    logger.info(f"Đã tạo LLM response thành công (sử dụng {len(top_results)} documents)")
+                    logger.info(f"[RAG] Generated response using {len(top_results)} documents from unit '{unit_name}'")
                     
                 except Exception as e:
-                    logger.error(f"Lỗi tạo LLM response: {str(e)}")
+                    logger.error(f"[RAG] LLM error: {str(e)}")
                     llm_response = "Không thể tạo câu trả lời từ LLM."
             
-            return RAGResponse(llm_response=llm_response, search_type="rag")
+            return RAGResponse(
+                llm_response=llm_response, 
+                search_type="rag",
+                unit_name=unit_name
+            )
             
         except Exception as e:
-            logger.error(f"Lỗi không mong đợi trong RAG search: {str(e)}")
+            logger.error(f"[RAG] Error: {str(e)}")
             import traceback
-            logger.error(f"Traceback: {traceback.format_exc()}")
-            return RAGResponse(llm_response="Lỗi hệ thống.", search_type="rag")
+            logger.error(traceback.format_exc())
+            return RAGResponse(
+                llm_response="Lỗi hệ thống.", 
+                search_type="rag",
+                unit_name=unit_name
+            )
 
 
 # Initialize service
 rag_service = RAGSearchService()
 
 
-# WRAPPER FUNCTION CHO RAG
+# WRAPPER FUNCTION CHO RAG với unit support
 
-def rag_search_wrapper(query, k=5, similarity_threshold=0.3):
-    """Wrapper trả về dict cho RAG search"""
-    logger.info(f"[WRAPPER] rag_search được gọi với query: {query}...")
+def rag_search_wrapper(query, unit_name=None, k=5, similarity_threshold=0.3):
+    """
+    Wrapper trả về dict cho RAG search với unit support
+    
+    Args:
+        query: Câu hỏi
+        unit_name: Tên đơn vị (nếu None thì lấy từ langgraph_service)
+        k: Số lượng results
+        similarity_threshold: Ngưỡng similarity
+    """
+    # Nếu không truyền unit_name, lấy từ langgraph_service
+    if unit_name is None:
+        try:
+            from app.services.langgraph_service import get_current_unit_name
+            unit_name = get_current_unit_name()
+            logger.info(f"[RAG_WRAPPER] Got unit_name from context: {unit_name}")
+        except Exception as e:
+            logger.warning(f"[RAG_WRAPPER] Cannot get unit_name from context: {e}, using default")
+            unit_name = "default_unit"
+    
+    logger.info(f"[RAG_WRAPPER] Query in unit '{unit_name}': {query[:50]}...")
     
     result = rag_service.search_with_llm(
         VectorSearchRequest(
             query=query,
             k=k,
             similarity_threshold=similarity_threshold
-        )
+        ),
+        unit_name=unit_name
     )
     
     # Trả về dict structured
@@ -225,34 +259,45 @@ def rag_search_wrapper(query, k=5, similarity_threshold=0.3):
         "llm_response": result.llm_response,
         "source": "rag",
         "search_type": "rag",
+        "unit_name": unit_name,
         "activities_raw": [],  # RAG không có activities
         "total": 0
     }
     
-    logger.info("[WRAPPER] Trả về RAG response (không có activities)")
+    logger.info(f"[RAG_WRAPPER] Response from unit '{unit_name}'")
     
     return output
 
 
-# LANGCHAIN TOOL - SỬ DỤNG WRAPPER
+# LANGCHAIN TOOL - với unit support
 
 rag_search_tool = StructuredTool.from_function(
     func=rag_search_wrapper,
     name="vector_rag_search",
-    description=f"""
-Thực hiện RAG search trên unified Redis vector database ({UNIFIED_INDEX_NAME}) để tìm tài liệu tương tự và generate câu trả lời từ LLM (Gemini).
+    description="""
+Thực hiện RAG search trên Redis vector database theo ĐƠN VỊ (unit-based) để tìm tài liệu và generate câu trả lời.
+
+**QUAN TRỌNG**: Mỗi đơn vị có thư viện riêng, chỉ search trong thư viện của đơn vị hiện tại.
+
+**CÁCH SỬ DỤNG**:
+- Nếu KHÔNG truyền unit_name: Tool sẽ tự động lấy unit_name từ context (người dùng hiện tại)
+- Nếu CÓ truyền unit_name: Tool sẽ search trong unit được chỉ định (chỉ admin mới được dùng)
 
 Input parameters:
-- query (str): Câu hỏi của người dùng
-- k (int, default=5): Số lượng documents cần lấy
-- similarity_threshold (float, default=0.5): Ngưỡng similarity tối thiểu (0-1)
+- query (str, REQUIRED): Câu hỏi của người dùng
+- unit_name (str, OPTIONAL): Tên đơn vị - NẾU KHÔNG TRUYỀN thì dùng unit của user hiện tại
+- k (int, default=5): Số lượng documents
+- similarity_threshold (float, default=0.3): Ngưỡng similarity (0-1)
 
 Output: 
-- llm_response: Câu trả lời được generate từ LLM
+- llm_response: Câu trả lời từ LLM dựa trên tài liệu
 - source: "rag"
-- search_type: "rag"
+- unit_name: Tên đơn vị đã search
 - activities_raw: [] (RAG không trả về hoạt động)
 
-Index hiện tại: {UNIFIED_INDEX_NAME} (chứa tất cả documents của hệ thống)
+**LƯU Ý**: 
+- Tool tự động lấy unit_name từ context, KHÔNG CẦN truyền thủ công
+- Chỉ search trong thư viện của đơn vị được chỉ định
+- Ví dụ gọi tool: vector_rag_search(query="quy định học vụ", k=5)
 """
 )

@@ -26,11 +26,26 @@ logger = logging.getLogger(__name__)
 MAX_MESSAGES = int(os.getenv('MAX_CONTEXT_MESSAGES', '10'))
 CONTEXT_STRATEGY = os.getenv('CONTEXT_STRATEGY', 'keep_system')
 
+# ============= THÊM PHẦN NÀY: Global unit_name management =============
+_current_unit_name = "default_unit"
+
+def set_current_unit_name(unit_name: str):
+    """Set unit_name để RAG tool sử dụng"""
+    global _current_unit_name
+    _current_unit_name = unit_name
+    logger.info(f"[LANGGRAPH] Set current unit_name: {unit_name}")
+
+def get_current_unit_name() -> str:
+    """Get unit_name hiện tại"""
+    return _current_unit_name
+# =======================================================================
+
 
 class AgentState(TypedDict):
     messages: Annotated[list, operator.add]
     user_role: str
     user_id: int
+    unit_name: str  # THÊM unit_name vào state
 
 
 def trim_messages(messages: list, max_messages: int = MAX_MESSAGES, strategy: str = CONTEXT_STRATEGY) -> list:
@@ -126,12 +141,12 @@ def trim_messages(messages: list, max_messages: int = MAX_MESSAGES, strategy: st
         return messages[-max_messages:]
 
 
-
 def create_agent_node(llm_with_tools):
     def agent(state: AgentState):
         messages = state["messages"]
         user_role = state.get("user_role", "student")
         user_id = state.get("user_id", 0)
+        unit_name = state.get("unit_name", "default_unit")  # LẤY unit_name từ state
         
         current_datetime = datetime.now()
         current_date_str = current_datetime.strftime("%d/%m/%Y")
@@ -148,9 +163,10 @@ THÔNG TIN THỜI GIAN HIỆN TẠI:
 Người dùng hiện tại:
 - Vai trò: {user_role}
 - ID: {user_id}
+- Đơn vị: {unit_name}
 
 Công cụ có sẵn:
-1. vector_rag_search - Tìm kiếm tài liệu trong hệ thống
+1. vector_rag_search - Tìm kiếm tài liệu trong thư viện của đơn vị "{unit_name}"
 2. activity_search - Tìm kiếm hoạt động ngoại khóa (dữ liệu thô)
 3. activity_search_with_summary - Tìm kiếm hoạt động + tóm tắt LLM
 
@@ -160,6 +176,13 @@ vector_rag_search: Dùng khi user hỏi về:
 - Quy định, quy trình, nội quy
 - Tài liệu hướng dẫn
 - Thông tin chung về hệ thống
+- Bất kỳ câu hỏi nào liên quan đến TÀI LIỆU của đơn vị
+
+QUAN TRỌNG khi gọi vector_rag_search:
+- Tool sẽ TỰ ĐỘNG search trong thư viện của đơn vị "{unit_name}"
+- KHÔNG CẦN truyền unit_name vào tool call
+- Ví dụ đúng: vector_rag_search(query="quy định học vụ", k=5)
+- Tool sẽ tự động lấy unit_name từ context
 
 activity_search: Dùng khi cần dữ liệu thô về hoạt động:
 - Liệt kê tất cả hoạt động
@@ -180,13 +203,13 @@ activity_search_with_summary(
 
 LƯU Ý QUAN TRỌNG:
 - KHÔNG BAO GIỜ truyền bearer_token vào tool call (hệ thống tự động xử lý)
+- KHÔNG BAO GIỜ truyền unit_name vào vector_rag_search (hệ thống tự động lấy từ context)
 - Chỉ gọi MỘT TOOL activity duy nhất cho mỗi câu hỏi
-- Nếu tool trả về total=0, DỪNG và trả lời "Không có hoạt động phù hợp"
-- KHÔNG suy đoán hoặc tự tạo dữ liệu hoạt động
+- Nếu tool trả về total=0, DỪNG và trả lời "Không có hoạt động/tài liệu phù hợp"
+- KHÔNG suy đoán hoặc tự tạo dữ liệu hoạt động/tài liệu
 """
         
         # GEMINI FIX: Loại bỏ tất cả SystemMessage cũ, chỉ giữ SystemMessage mới ở đầu
-        # Gemini yêu cầu: SystemMessage chỉ ở đầu, sau đó là User/AI/Tool messages
         non_system_messages = [msg for msg in messages if not isinstance(msg, SystemMessage)]
         
         # Xây dựng messages mới: SystemMessage + non_system_messages
@@ -195,7 +218,7 @@ LƯU Ý QUAN TRỌNG:
         # Trim messages (giữ SystemMessage đầu tiên)
         full_messages = trim_messages(full_messages)
         
-        logger.info(f"Sending {len(full_messages)} messages to Gemini:")
+        logger.info(f"[AGENT] Sending {len(full_messages)} messages to Gemini (unit: {unit_name}):")
         for idx, msg in enumerate(full_messages):
             msg_type = type(msg).__name__
             has_tool_calls = hasattr(msg, 'tool_calls') and msg.tool_calls
@@ -260,31 +283,58 @@ def process_query(
     user_role: str = "student",
     user_id: int = 0,
     bearer_token: str = None,
+    unit_name: str = "default_unit",  # ========= THÊM PARAMETER NÀY =========
     thread_id: str | None = None
 ) -> str:
+    """
+    Process user query với LangGraph agent
+    
+    Args:
+        query: Câu hỏi của user
+        user_role: Role của user (student/advisor/admin)
+        user_id: ID của user
+        bearer_token: JWT token để call external APIs
+        unit_name: Tên đơn vị của user (VD: "Khoa Công nghệ Thông tin")
+        thread_id: ID của conversation thread (optional)
+    
+    Returns:
+        JSON string với response
+    """
     try:
+        # Set bearer token cho activity search
         if bearer_token:
             set_bearer_token(bearer_token)
-            logger.info(f"Token set: {bearer_token[:20]}...")
+            logger.info(f"[PROCESS_QUERY] Token set: {bearer_token[:20]}...")
         else:
-            logger.warning("No bearer token provided")
+            logger.warning("[PROCESS_QUERY] No bearer token provided")
         
+        # ========= Set unit_name cho RAG search =========
+        set_current_unit_name(unit_name)
+        logger.info(f"[PROCESS_QUERY] Unit set: {unit_name}")
+        
+        # Generate thread_id nếu chưa có
         if not thread_id:
             thread_id = f"user_{user_id}_{uuid.uuid4().hex[:8]}"
-            logger.info(f"Generated thread_id: {thread_id}")
+            logger.info(f"[PROCESS_QUERY] Generated thread_id: {thread_id}")
         
         config = {"configurable": {"thread_id": thread_id}}
         
+        # Check conversation history
         state = graph.get_state(config)
         current_messages = state.values.get("messages", []) if state else []
-        logger.info(f"Thread {thread_id} has {len(current_messages)} messages in history")
+        logger.info(f"[PROCESS_QUERY] Thread {thread_id} has {len(current_messages)} messages in history")
         
+        # ========= Prepare initial state với unit_name =========
         initial_state = {
             "messages": [HumanMessage(content=query)],
             "user_role": user_role,
-            "user_id": user_id
+            "user_id": user_id,
+            "unit_name": unit_name  # THÊM unit_name vào state
         }
         
+        logger.info(f"[PROCESS_QUERY] Processing query from user {user_id} ({user_role}) in unit '{unit_name}'")
+        
+        # Invoke graph
         result = graph.invoke(initial_state, config)
         
         messages = result.get("messages", [])
@@ -299,6 +349,7 @@ def process_query(
         last_message = messages[-1]
         response_text = last_message.content if hasattr(last_message, 'content') else str(last_message)
         
+        # Extract activities và source từ tool messages
         activities_raw = []
         source = "general"
         total_activities = 0
@@ -315,13 +366,15 @@ def process_query(
                         activities_raw = tool_result.get('activities_raw', [])
                         total_activities = tool_result.get('total', 0)
                         source = 'activity'
+                        logger.info(f"[PROCESS_QUERY] Found {total_activities} activities from tool")
                     elif tool_result.get('source') == 'rag':
                         source = 'rag'
+                        logger.info(f"[PROCESS_QUERY] RAG search performed in unit '{unit_name}'")
             except Exception as e:
-                logger.error(f"Tool message parse error: {e}")
+                logger.error(f"[PROCESS_QUERY] Tool message parse error: {e}")
         
         total_messages_after = len(messages)
-        logger.info(f"Thread {thread_id} now has {total_messages_after} messages after processing")
+        logger.info(f"[PROCESS_QUERY] Thread {thread_id} now has {total_messages_after} messages after processing")
         
         return json.dumps({
             "status": "success",
@@ -329,6 +382,7 @@ def process_query(
                 "response": response_text,
                 "user_role": user_role,
                 "user_id": user_id,
+                "unit_name": unit_name,  # Thêm unit_name vào response
                 "source": source,
                 "activities": activities_raw,
                 "total_activities": total_activities,
@@ -343,7 +397,7 @@ def process_query(
         }, ensure_ascii=False, indent=2)
         
     except Exception as e:
-        logger.error(f"Process error: {str(e)}")
+        logger.error(f"[PROCESS_QUERY] Process error: {str(e)}")
         import traceback
         logger.error(traceback.format_exc())
         
