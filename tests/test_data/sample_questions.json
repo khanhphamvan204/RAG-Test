@@ -1,0 +1,224 @@
+[
+  {
+    "question": "Theo đoạn văn bản, lĩnh vực 'Thuật toán tối ưu hóa và Hệ thống thông minh' tập trung vào những hướng nghiên cứu chính nào?",
+    "ground_truth": "Các hướng nghiên cứu chính trong lĩnh vực 'Thuật toán tối ưu hóa và Hệ thống thông minh' bao gồm: Phát triển các thuật toán tối ưu hóa thông minh; Ứng dụng tối ưu hóa trong xếp lịch, chuỗi cung ứng và vận hành sản xuất; Ứng dụng thuật toán tối ưu trong tài chính và đầu tư; và Kết hợp AI với các thuật toán tối ưu để tăng cường hiệu suất hệ thống.",
+    "contexts": [
+      "5. Thuật toán tối ưu hóa và Hệ thống thông minh Tối ưu hóa là chìa khóa để nâng cao hiệu suất trong nhiều lĩnh vực, từ lập lịch, quản lý tài nguyên đến điều phối hệ thống. Các hướng nghiên cứu chính bao gồm: Phát triển các thuật toán tối ưu hóa thông minh. Ứng dụng tối ưu hóa trong xếp lịch, chuỗi cung ứng và vận hành sản xuất. Ứng dụng thuật toán tối ưu trong tài chính và đầu tư. Kết hợp AI với các thuật toán tối ưu để tăng cường hiệu suất hệ thống."
+    ],
+    "difficulty": "easy",
+    "source_filename": "CÁC HƯỚNG NGHIÊN CỨU CHÍNH KHOA CÔNG NGHỆ THÔNG TIN.docx",
+    "unit_name": "khoa_cong_nghe_thong_tin",
+    "generated_at": "2025-12-02T19:58:10.581885"
+  },
+  {
+    "question": "Trong lĩnh vực 'Bảo mật hệ thống mạng và an toàn thông tin', đoạn văn bản đề cập đến những trọng tâm nghiên cứu cụ thể nào?",
+    "ground_truth": "Các nghiên cứu trong lĩnh vực 'Bảo mật hệ thống mạng và an toàn thông tin' tập trung vào: Phát triển các giải pháp bảo mật hệ thống mạng và an toàn thông tin; Ứng dụng AI trong phát hiện và ngăn chặn tấn công mạng; Xây dựng mô hình xác thực sinh trắc học; và Bảo vệ quyền riêng tư và đảm bảo tính ẩn danh dữ liệu.",
+    "contexts": [
+      "trọng trong lĩnh vực CNTT. Các nghiên cứu trong lĩnh vực này tập trung vào: Phát triển các giải pháp bảo mật hệ thống mạng và an toàn thông tin. Ứng dụng AI trong phát hiện và ngăn chặn tấn công mạng. Xây dựng mô hình xác thực sinh trắc học. Bảo vệ quyền riêng tư và đảm bảo tính ẩn danh dữ liệu."
+    ],
+    "difficulty": "medium",
+    "source_filename": "CÁC HƯỚNG NGHIÊN CỨU CHÍNH KHOA CÔNG NGHỆ THÔNG TIN.docx",
+    "unit_name": "khoa_cong_nghe_thong_tin",
+    "generated_at": "2025-12-02T19:58:10.581885"
+  },
+  {
+    "question": "Dựa vào 'Lời kết' của đoạn văn bản, Khoa CNTT khuyến khích sinh viên tham gia các dự án nghiên cứu như thế nào, và việc tham gia này mang lại những lợi ích gì cho sinh viên?",
+    "ground_truth": "Khoa CNTT luôn khuyến khích sinh viên tham gia vào các dự án nghiên cứu. Việc tham gia này mang lại các lợi ích như: rèn luyện kỹ năng chuyên môn, tư duy sáng tạo và mở rộng cơ hội nghề nghiệp. Ngoài ra, Khoa còn mời gọi những sinh viên đam mê công nghệ tham gia ngay vào các nhóm nghiên cứu để khám phá những ứng dụng tiên tiến.",
+    "contexts": [
+      "Lời kết Với những hướng nghiên cứu đa dạng và cập nhật theo xu hướng công nghệ, Khoa CNTT luôn khuyến khích sinh viên tham gia vào các dự án nghiên cứu để rèn luyện kỹ năng chuyên môn, tư duy sáng tạo và mở rộng cơ hội nghề nghiệp. Nếu bạn đam mê công nghệ và muốn khám phá những ứng dụng tiên tiến, hãy tham gia ngay vào các nhóm nghiên cứu của Khoa!"
+    ],
+    "difficulty": "hard",
+    "source_filename": "CÁC HƯỚNG NGHIÊN CỨU CHÍNH KHOA CÔNG NGHỆ THÔNG TIN.docx",
+    "unit_name": "khoa_cong_nghe_thong_tin",
+    "generated_at": "2025-12-02T19:58:10.581885"
+  },
+  {
+    "question": "Nếu một người muốn phát triển các ứng dụng thực tế hỗ trợ kinh doanh và quản lý, họ nên tập trung vào những hướng nghiên cứu cụ thể nào được đề cập trong phần 'Phát triển phần mềm và Ứng dụng công nghệ mới'?",
+    "ground_truth": "Nếu một người muốn phát triển các ứng dụng thực tế hỗ trợ kinh doanh và quản lý, họ nên tập trung vào các hướng nghiên cứu được đề cập trong phần 'Phát triển phần mềm và Ứng dụng công nghệ mới' bao gồm: Xây dựng hệ thống hỗ trợ học tập và quản lý giáo dục; Phát triển nền tảng thương mại điện tử và dịch vụ trực tuyến; Ứng dụng công nghệ di động và nền tảng đa phương tiện; và Nghiên cứu và phát triển các mô hình mạng xã hội thông minh.",
+    "contexts": [
+      "6. Phát triển phần mềm và Ứng dụng công nghệ mới Ngoài nghiên cứu lý thuyết, Khoa CNTT cũng tập trung vào việc phát triển các ứng dụng thực tế hỗ trợ học tập, kinh doanh và quản lý. Các nghiên cứu bao gồm: Xây dựng hệ thống hỗ trợ học tập và quản lý giáo dục. Phát triển nền tảng thương mại điện tử và dịch vụ trực tuyến. Ứng dụng công nghệ di động và nền tảng đa phương tiện. Nghiên cứu và phát triển các mô hình mạng xã hội thông minh."
+    ],
+    "difficulty": "medium",
+    "source_filename": "CÁC HƯỚNG NGHIÊN CỨU CHÍNH KHOA CÔNG NGHỆ THÔNG TIN.docx",
+    "unit_name": "khoa_cong_nghe_thong_tin",
+    "generated_at": "2025-12-02T19:58:10.581885"
+  },
+  {
+    "question": "Theo đoạn văn bản, Đoàn Khoa Công nghệ Thông tin sẽ tổ chức những hoạt động cụ thể nào để bảo vệ môi trường?",
+    "ground_truth": "Để bảo vệ môi trường, Đoàn Khoa Công nghệ Thông tin sẽ tham gia các hoạt động như “Ngày Chủ nhật xanh”, thu gom rác thải điện tử, trồng cây xanh và tuyên truyền ý thức bảo vệ môi trường.",
+    "contexts": [
+      "Tham gia các hoạt động bảo vệ môi trường như “Ngày Chủ nhật xanh”, thu gom rác thải điện tử, trồng cây xanh, tuyên truyền ý thức bảo vệ môi trường."
+    ],
+    "difficulty": "easy",
+    "source_filename": "GIỚI THIỆU ĐOÀN THANH NIÊN KHOA CÔNG NGHỆ THÔNG TIN.docx",
+    "unit_name": "khoa_cong_nghe_thong_tin",
+    "generated_at": "2025-12-02T19:58:25.271431"
+  },
+  {
+    "question": "Đoàn Khoa Công nghệ Thông tin dự kiến thực hiện những biện pháp nào để hỗ trợ sinh viên tiếp cận việc làm và phát triển kỹ năng cần thiết cho công việc tương lai?",
+    "ground_truth": "Đoàn Khoa Công nghệ Thông tin sẽ hỗ trợ sinh viên tiếp cận việc làm và phát triển kỹ năng bằng cách:\n1. Phối hợp với các doanh nghiệp tổ chức các buổi hội thảo nghề nghiệp, hướng nghiệp cho sinh viên.\n2. Kết nối với các công ty CNTT để tạo cơ hội thực tập, việc làm cho sinh viên ngay từ khi còn ngồi trên ghế nhà trường.\n3. Hỗ trợ sinh viên xây dựng CV, rèn luyện kỹ năng phỏng vấn và kỹ năng mềm phục vụ công việc tương lai.",
+    "contexts": [
+      "5. Tăng cường kết nối doanh nghiệp, hỗ trợ sinh viên tiếp cận việc làm Phối hợp với các doanh nghiệp tổ chức các buổi hội thảo nghề nghiệp, hướng nghiệp cho sinh viên. Kết nối với các công ty CNTT để tạo cơ hội thực tập, việc làm cho sinh viên ngay từ khi còn ngồi trên ghế nhà trường. Hỗ trợ sinh viên xây dựng CV, rèn luyện kỹ năng phỏng vấn và kỹ năng mềm phục vụ công việc tương lai."
+    ],
+    "difficulty": "medium",
+    "source_filename": "GIỚI THIỆU ĐOÀN THANH NIÊN KHOA CÔNG NGHỆ THÔNG TIN.docx",
+    "unit_name": "khoa_cong_nghe_thong_tin",
+    "generated_at": "2025-12-02T19:58:25.271431"
+  },
+  {
+    "question": "Bên cạnh các hoạt động hỗ trợ học tập và nghề nghiệp, Đoàn Khoa Công nghệ Thông tin trong nhiệm kỳ 2024 - 2027 sẽ tập trung vào hai nhóm sáng kiến chính nào để phát triển cộng đồng và kỹ năng cá nhân cho sinh viên?",
+    "ground_truth": "Trong nhiệm kỳ 2024 - 2027, Đoàn Khoa Công nghệ Thông tin sẽ tập trung vào hai nhóm sáng kiến chính để phát triển cộng đồng và kỹ năng cá nhân cho sinh viên:\n1. **Tổ chức các phong trào tình nguyện vì cộng đồng**: Bao gồm các chiến dịch mùa hè xanh, tiếp sức mùa thi, hỗ trợ trẻ em nghèo hiếu học, tham gia bảo vệ môi trường (Ngày Chủ nhật xanh, thu gom rác thải điện tử, trồng cây xanh, tuyên truyền), và các chương trình thiện nguyện, gây quỹ giúp đỡ sinh viên có hoàn cảnh khó khăn.\n2. **Xây dựng Đoàn vững mạnh, phát triển kỹ năng lãnh đạo cho sinh viên**: Bao gồm tổ chức các khóa đào tạo kỹ năng lãnh đạo, làm việc nhóm, quản lý dự án cho cán bộ Đoàn và sinh viên, đẩy mạnh công tác phát triển Đoàn viên ưu tú và giới thiệu họ cho Đảng, cùng với việc xây dựng các kênh truyền thông hiện đại.",
+    "contexts": [
+      "3. Tổ chức các phong trào tình nguyện vì cộng đồng Đẩy mạnh hoạt động \"Thanh niên tình nguyện\", trong đó tổ chức các chiến dịch mùa hè xanh, tiếp sức mùa thi, hỗ trợ trẻ em nghèo hiếu học. Tham gia các hoạt động bảo vệ môi trường như “Ngày Chủ nhật xanh”, thu gom rác thải điện tử, trồng cây xanh, tuyên truyền ý thức bảo vệ môi trường. Tổ chức các chương trình thiện nguyện, gây quỹ giúp đỡ sinh viên có hoàn cảnh khó khăn.",
+      "6. Xây dựng Đoàn vững mạnh, phát triển kỹ năng lãnh đạo cho sinh viên Tổ chức các khóa đào tạo kỹ năng lãnh đạo, làm việc nhóm, quản lý dự án cho cán bộ Đoàn và sinh viên có nguyện vọng phát triển bản thân. Đẩy mạnh công tác phát triển Đoàn viên ưu tú, giới thiệu Đoàn viên ưu tú cho Đảng xem xét kết nạp. Xây dựng các kênh truyền thông hiện đại để cập nhật thông tin và lan tỏa hoạt động của Đoàn khoa đến sinh viên một cách nhanh chóng, hiệu quả."
+    ],
+    "difficulty": "hard",
+    "source_filename": "GIỚI THIỆU ĐOÀN THANH NIÊN KHOA CÔNG NGHỆ THÔNG TIN.docx",
+    "unit_name": "khoa_cong_nghe_thong_tin",
+    "generated_at": "2025-12-02T19:58:25.271431"
+  },
+  {
+    "question": "Ngoài các hoạt động văn hóa, Đoàn Khoa Công nghệ Thông tin còn đẩy mạnh những giải đấu thể dục thể thao cụ thể nào nhằm nâng cao tinh thần đoàn kết và rèn luyện sức khỏe cho sinh viên?",
+    "ground_truth": "Để nâng cao tinh thần đoàn kết và rèn luyện sức khỏe, Đoàn Khoa Công nghệ Thông tin sẽ đẩy mạnh phong trào thể dục thể thao với các giải đấu bóng đá, cầu lông, cờ vua và bóng chuyền.",
+    "contexts": [
+      "Đẩy mạnh phong trào thể dục thể thao với các giải đấu bóng đá, cầu lông, cờ vua, bóng chuyền nhằm nâng cao tinh thần đoàn kết và rèn luyện sức khỏe."
+    ],
+    "difficulty": "medium",
+    "source_filename": "GIỚI THIỆU ĐOÀN THANH NIÊN KHOA CÔNG NGHỆ THÔNG TIN.docx",
+    "unit_name": "khoa_cong_nghe_thong_tin",
+    "generated_at": "2025-12-02T19:58:25.271431"
+  },
+  {
+    "question": "Theo văn bản, Công nghệ thông tin được định nghĩa rộng rãi như thế nào?",
+    "ground_truth": "Theo văn bản, Công nghệ thông tin hiểu theo nghĩa rộng là việc sử dụng máy tính và phần mềm máy tính vào việc tạo ra, lưu trữ, xử lý và truyền dẫn thông tin.",
+    "contexts": [
+      "Công nghệ thông tin hiểu theo nghĩa rộng là việc sử dụng máy tính và phần mềm máy tính vào việc tạo ra, lưu trữ, xử lý và truyền dẫn thông tin."
+    ],
+    "difficulty": "easy",
+    "source_filename": "NGÀNH CÔNG NGHỆ THÔNG TIN HỆ ĐẠI HỌC.docx",
+    "unit_name": "khoa_cong_nghe_thong_tin",
+    "generated_at": "2025-12-02T19:58:36.699309"
+  },
+  {
+    "question": "Mục tiêu đào tạo của ngành Công nghệ thông tin trang bị cho sinh viên những khả năng cụ thể nào liên quan đến việc phát triển ứng dụng và hệ thống thông tin?",
+    "ground_truth": "Mục tiêu đào tạo trang bị cho sinh viên khả năng lập trình các phần mềm máy tính, điện thoại di động, game, thương mại điện tử. Ngoài ra, sinh viên còn có khả năng xây dựng hệ thống thông tin, cũng như phân tích và lập dự án triển khai các phần mềm ứng dụng.",
+    "contexts": [
+      "Sinh viên có khả năng lập trình các phần mềm máy tính, điện thoại di động, game, thương mại điện tử; xây dựng hệ thống thông tin; phân tích và lập dự án triển khai các phần mềm ứng dụng;..."
+    ],
+    "difficulty": "medium",
+    "source_filename": "NGÀNH CÔNG NGHỆ THÔNG TIN HỆ ĐẠI HỌC.docx",
+    "unit_name": "khoa_cong_nghe_thong_tin",
+    "generated_at": "2025-12-02T19:58:36.699309"
+  },
+  {
+    "question": "Ngoài kiến thức chuyên sâu về công nghệ, những kỹ năng mềm và khía cạnh phát triển cá nhân nào được nhấn mạnh trong mục tiêu đào tạo của ngành Công nghệ thông tin, và mục đích của việc phát triển những kỹ năng này là gì?",
+    "ground_truth": "Bên cạnh kỹ năng chuyên môn, mục tiêu đào tạo ngành Công nghệ thông tin còn nhấn mạnh việc phát triển các kỹ năng mềm như làm việc theo nhóm, giao tiếp, và khả năng tự nghiên cứu, thử nghiệm. Mục đích của việc phát triển những kỹ năng này là để sinh viên có thể ứng dụng công nghệ nhằm đáp ứng các nhu cầu thực tế của đời sống.",
+    "contexts": [
+      "Bên cạnh kỹ năng làm việc theo nhóm, kỹ năng giao tiếp, sinh viên còn được phát triển khả năng tự nghiên cứu, thử nghiệm để ứng dụng công nghệ đáp ứng các nhu cầu thực tế của đời sống."
+    ],
+    "difficulty": "hard",
+    "source_filename": "NGÀNH CÔNG NGHỆ THÔNG TIN HỆ ĐẠI HỌC.docx",
+    "unit_name": "khoa_cong_nghe_thong_tin",
+    "generated_at": "2025-12-02T19:58:36.699309"
+  },
+  {
+    "question": "Văn bản liệt kê những vị trí nghề nghiệp nào mà sinh viên tốt nghiệp ngành Công nghệ thông tin có thể đảm nhiệm?",
+    "ground_truth": "Sinh viên tốt nghiệp ngành Công nghệ thông tin có thể làm việc ở những vị trí như: Lập trình viên phần mềm, chuyên viên phân tích thiết kế hệ thống, quản lý dữ liệu, quản trị mạng, kỹ thuật phần cứng máy tính.",
+    "contexts": [
+      "Lập trình viên phần mềm, chuyên viên phân tích thiết kế hệ thống, quản lý dữ liệu, quản trị mạng, kỹ thuật phần cứng máy tính,..."
+    ],
+    "difficulty": "medium",
+    "source_filename": "NGÀNH CÔNG NGHỆ THÔNG TIN HỆ ĐẠI HỌC.docx",
+    "unit_name": "khoa_cong_nghe_thong_tin",
+    "generated_at": "2025-12-02T19:58:36.699309"
+  },
+  {
+    "question": "Trong \"Hội thi ảnh 'HUIT vui Tết đoàn viên Giáp Thìn 2024'\", tổ Công đoàn Khoa CNTT đã đạt được những giải thưởng nào?",
+    "ground_truth": "Trong \"Hội thi ảnh 'HUIT vui Tết đoàn viên Giáp Thìn 2024'\", tổ Công đoàn Khoa CNTT đã đạt được giải Nhì và giải Khuyến khích.",
+    "contexts": [
+      "Hội thi ảnh \"HUIT vui Tết đoàn viên Giáp Thìn 2024\": Giải Nhì, giải Khuyến khích."
+    ],
+    "difficulty": "easy",
+    "source_filename": "GIỚI THIỆU TỔ CÔNG ĐOÀN KHOA CÔNG NGHỆ THÔNG TIN.docx",
+    "unit_name": "khoa_cong_nghe_thong_tin",
+    "generated_at": "2025-12-02T19:58:48.609259"
+  },
+  {
+    "question": "Ngoài vai trò truyền đạt tri thức, các giảng viên và nhân viên trong tổ Công đoàn Khoa CNTT còn có những vai trò quan trọng nào khác trong việc tạo dựng môi trường làm việc và học tập?",
+    "ground_truth": "Ngoài vai trò truyền đạt tri thức, các giảng viên và nhân viên trong tổ Công đoàn Khoa CNTT còn là những người giữ lửa cho phong trào, góp phần tạo nên môi trường học tập và làm việc đầy hứng khởi.",
+    "contexts": [
+      "Mỗi giảng viên, nhân viên trong tổ Công đoàn không chỉ là những người truyền đạt tri thức, mà còn là những người giữ lửa cho phong trào, góp phần tạo nên môi trường học tập và làm việc đầy hứng khởi."
+    ],
+    "difficulty": "medium",
+    "source_filename": "GIỚI THIỆU TỔ CÔNG ĐOÀN KHOA CÔNG NGHỆ THÔNG TIN.docx",
+    "unit_name": "khoa_cong_nghe_thong_tin",
+    "generated_at": "2025-12-02T19:58:48.609259"
+  },
+  {
+    "question": "Dựa trên đoạn văn bản, hãy mô tả đặc điểm của đội ngũ công đoàn viên Khoa CNTT và phân tích cách những đặc điểm này ảnh hưởng đến tinh thần hoạt động cũng như các mục tiêu phát triển trong tương lai của tổ Công đoàn?",
+    "ground_truth": "Đội ngũ công đoàn viên của Khoa CNTT được mô tả là vừa giỏi chuyên môn, vừa năng động trong hoạt động phong trào. Những đặc điểm này giúp tổ Công đoàn duy trì tinh thần đoàn kết, hỗ trợ lẫn nhau trong công việc và cuộc sống. Với đội ngũ như vậy, tổ Công đoàn đặt mục tiêu tiếp tục đẩy mạnh các hoạt động, nâng cao chất lượng phong trào và phấn đấu đạt nhiều thành tích hơn nữa, góp phần vào sự phát triển chung của Khoa và Nhà trường trong thời gian tới.",
+    "contexts": [
+      "Với đội ngũ công đoàn viên vừa giỏi chuyên môn, vừa năng động trong hoạt động phong trào, tổ Công đoàn Khoa CNTT luôn duy trì tinh thần đoàn kết, hỗ trợ lẫn nhau trong công việc và cuộc sống. Mỗi giảng viên, nhân viên trong tổ Công đoàn không chỉ là những người truyền đạt tri thức, mà còn là những người giữ lửa cho phong trào, góp phần tạo nên môi trường học tập và làm việc đầy hứng khởi. Trong thời gian tới, tổ Công đoàn Khoa CNTT sẽ tiếp tục đẩy mạnh các hoạt động, nâng cao chất lượng phong trào và phấn đấu đạt nhiều thành tích hơn nữa, góp phần vào sự phát triển chung của Khoa và Nhà trường."
+    ],
+    "difficulty": "hard",
+    "source_filename": "GIỚI THIỆU TỔ CÔNG ĐOÀN KHOA CÔNG NGHỆ THÔNG TIN.docx",
+    "unit_name": "khoa_cong_nghe_thong_tin",
+    "generated_at": "2025-12-02T19:58:48.609259"
+  },
+  {
+    "question": "Trong thời gian tới, tổ Công đoàn Khoa CNTT có những kế hoạch cụ thể nào để đóng góp vào sự phát triển chung của Khoa và Nhà trường?",
+    "ground_truth": "Trong thời gian tới, tổ Công đoàn Khoa CNTT sẽ tiếp tục đẩy mạnh các hoạt động, nâng cao chất lượng phong trào và phấn đấu đạt nhiều thành tích hơn nữa, nhằm góp phần vào sự phát triển chung của Khoa và Nhà trường.",
+    "contexts": [
+      "Trong thời gian tới, tổ Công đoàn Khoa CNTT sẽ tiếp tục đẩy mạnh các hoạt động, nâng cao chất lượng phong trào và phấn đấu đạt nhiều thành tích hơn nữa, góp phần vào sự phát triển chung của Khoa và Nhà trường."
+    ],
+    "difficulty": "medium",
+    "source_filename": "GIỚI THIỆU TỔ CÔNG ĐOÀN KHOA CÔNG NGHỆ THÔNG TIN.docx",
+    "unit_name": "khoa_cong_nghe_thong_tin",
+    "generated_at": "2025-12-02T19:58:48.609259"
+  },
+  {
+    "question": "Theo đoạn văn bản, hãy liệt kê ít nhất ba môn học chuyên ngành tiêu biểu mà người học sẽ được trang bị.",
+    "ground_truth": "Các môn học chuyên ngành tiêu biểu được đề cập bao gồm: Hệ quản trị Cơ sở dữ liệu, Kỹ thuật lập trình, Lập trình Web, Lập trình di động, Trí tuệ nhân tạo, Công nghệ Java/.NET, Internet of Things, Deep learning, Khai phá dữ liệu, Nhập môn Big Data, Quản trị hệ thống mạng, Phân tích thiết kế hệ thống, Chuyên đề công nghệ mới và chuyển đổi số, Học máy nâng cao. (Người học có thể liệt kê bất kỳ 3 môn nào trong số này).",
+    "contexts": [
+      "Các môn học chuyên ngành tiêu biểu 🔶 Hệ quản trị Cơ sở dữ liệu 🔶 Kỹ thuật lập trình 🔶 Lập trình Web 🔶 Lập trình di động 🔶 Trí tuệ nhân tạo 🔶 Công nghệ Java/.NET 🔶 Internet of Things 🔶 Deep learning 🔶 Khai phá dữ liệu 🔶 Nhập môn Big Data 🔶 Quản trị hệ thống mạng 🔶 Phân tích thiết kế hệ thống 🔶 Chuyên đề công nghệ mới và chuyển đổi số 🔶 Học máy nâng cao"
+    ],
+    "difficulty": "easy",
+    "source_filename": "NGÀNH CÔNG NGHỆ THÔNG TIN HỆ ĐẠI HỌC.docx",
+    "unit_name": "khoa_cong_nghe_thong_tin",
+    "generated_at": "2025-12-02T19:59:04.405004"
+  },
+  {
+    "question": "Ngoài việc đào tạo chuyên môn kỹ thuật theo yêu cầu nhà tuyển dụng, người học còn được hưởng những quyền lợi nào liên quan đến việc làm và phát triển kỹ năng mềm?",
+    "ground_truth": "Người học được hưởng các quyền lợi sau: Được hỗ trợ giới thiệu việc làm trong thời gian học và sau khi tốt nghiệp; Được tham gia các lớp kỹ năng mềm; Được tham gia các lớp đổi mới sáng tạo và khởi nghiệp của trường tổ chức.",
+    "contexts": [
+      "QUYỀN LỢI CỦA NGƯỜI HỌC 🔶 Được đào tạo chuyên môn kỹ thuật theo yêu cầu của nhà tuyển dụng. 🔶 Được hỗ trợ giới thiệu việc làm trong thời gian học và sau khi tốt nghiệp. 🔶 Được tham gia các lớp kỹ năng mềm; Các lớp đổi mới sáng tạo và khởi nghiệp của trường tổ chức."
+    ],
+    "difficulty": "medium",
+    "source_filename": "NGÀNH CÔNG NGHỆ THÔNG TIN HỆ ĐẠI HỌC.docx",
+    "unit_name": "khoa_cong_nghe_thong_tin",
+    "generated_at": "2025-12-02T19:59:04.405004"
+  },
+  {
+    "question": "Theo thông tin về quyền lợi của người học, thời gian đào tạo cho ngành này được quy định trong khoảng bao lâu?",
+    "ground_truth": "Thời gian đào tạo cho ngành này là từ 3,5 đến 4 năm.",
+    "contexts": [
+      "Thời gian đào tạo: 3,5 - 4 năm."
+    ],
+    "difficulty": "easy",
+    "source_filename": "NGÀNH CÔNG NGHỆ THÔNG TIN HỆ ĐẠI HỌC.docx",
+    "unit_name": "khoa_cong_nghe_thong_tin",
+    "generated_at": "2025-12-02T19:59:04.405004"
+  },
+  {
+    "question": "Dựa vào các môn học chuyên ngành tiêu biểu và những tố chất phù hợp được liệt kê, hãy giải thích tại sao 'tư duy logic' và 'khả năng tiếp cận nhanh các công nghệ mới' lại là những yếu tố then chốt cho sự thành công trong ngành học này.",
+    "ground_truth": "Tư duy logic là yếu tố then chốt vì nó được đòi hỏi trong nhiều môn học nền tảng và phức tạp như Hệ quản trị Cơ sở dữ liệu, Kỹ thuật lập trình, Phân tích thiết kế hệ thống, giúp người học giải quyết vấn đề và xây dựng cấu trúc hệ thống một cách hiệu quả. Khả năng tiếp cận nhanh các công nghệ mới là quan trọng bởi ngành này bao gồm nhiều lĩnh vực đang phát triển nhanh chóng như Trí tuệ nhân tạo, Internet of Things, Deep learning, Khai phá dữ liệu, Big Data, và các chuyên đề công nghệ mới. Tố chất 'nhạy bén, tiếp cận nhanh, chủ động trong công việc' và 'sáng tạo' giúp người học không ngừng cập nhật và ứng dụng các tiến bộ công nghệ để không bị tụt hậu và tạo ra các giải pháp đổi mới.",
+    "contexts": [
+      "Các môn học chuyên ngành tiêu biểu 🔶 Hệ quản trị Cơ sở dữ liệu 🔶 Kỹ thuật lập trình 🔶 Trí tuệ nhân tạo 🔶 Internet of Things 🔶 Deep learning 🔶 Khai phá dữ liệu 🔶 Nhập môn Big Data 🔶 Phân tích thiết kế hệ thống 🔶 Chuyên đề công nghệ mới và chuyển đổi số 🔶 Học máy nâng cao",
+      "Những tố chất phù hợp với ngành 🔶 Thông minh, năng động, có đam mê 🔶 Học tốt các môn tự nhiên 🔶 Có tư duy logic, tư duy hệ thống 🔶 Có tính kiên trì, sáng tạo 🔶 Nhạy bén, tiếp cận nhanh, chủ động trong công việc 🔶 Có tinh thần hợp tác, khả năng làm việc theo nhóm."
+    ],
+    "difficulty": "hard",
+    "source_filename": "NGÀNH CÔNG NGHỆ THÔNG TIN HỆ ĐẠI HỌC.docx",
+    "unit_name": "khoa_cong_nghe_thong_tin",
+    "generated_at": "2025-12-02T19:59:04.405004"
+  }
+]

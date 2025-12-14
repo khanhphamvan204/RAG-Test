@@ -1,0 +1,24 @@
+# Test dependencies for RAG system
+# Install with: pip install -r requirements-test.txt
+
+# Ragas framework for RAG evaluation
+ragas>=0.1.15
+
+# Testing framework
+pytest>=7.4.0
+pytest-asyncio>=0.21.0
+pytest-cov>=4.1.0
+
+# Data handling
+datasets>=2.14.0
+
+# Visualization
+matplotlib>=3.7.0
+seaborn>=0.12.0
+
+# HTTP client for API testing
+requests>=2.31.0
+httpx>=0.25.0
+
+# Additional evaluation tools
+langchain-community>=0.3.0

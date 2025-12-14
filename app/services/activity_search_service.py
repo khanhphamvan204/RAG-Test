@@ -271,21 +271,21 @@ class ActivitySearchService:
                     prompt_template = PromptTemplate(
                         input_variables=["context", "total", "filters"],
                         template="""
-🎯 Vai trò:
+Vai trò:
 Bạn là trợ lý AI chuyên tổng hợp thông tin về các hoạt động sinh viên.
 
-📋 Nhiệm vụ:
+Nhiệm vụ:
 Hãy tóm tắt các hoạt động sau đây một cách rõ ràng, dễ hiểu cho sinh viên và cố vấn.
 
-🔍 Tiêu chí tìm kiếm:
+Tiêu chí tìm kiếm:
 {filters}
 
-📊 Kết quả: Tìm thấy {total} hoạt động
+Kết quả: Tìm thấy {total} hoạt động
 
-📂 Danh sách hoạt động:
+Danh sách hoạt động:
 {context}
 
-💡 Yêu cầu trả lời:
+Yêu cầu trả lời:
 1. **Tóm tắt tổng quan** (1-2 câu về số lượng và loại hoạt động)
 2. **Danh sách hoạt động nổi bật** (liệt kê 3-5 hoạt động quan trọng nhất):
    - Tên hoạt động
