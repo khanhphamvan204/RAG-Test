@@ -3,7 +3,9 @@ from langgraph.graph import StateGraph, END
 from langgraph.prebuilt import ToolNode
 from langgraph.checkpoint.memory import MemorySaver
 from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_openai import ChatOpenAI
 from langchain_core.messages import SystemMessage, HumanMessage, ToolMessage, AIMessage
+from langgraph.types import Command
 import operator
 import logging
 import json
@@ -11,10 +13,10 @@ from dotenv import load_dotenv
 import os
 from datetime import datetime
 import uuid
+from app.config import Config
 
 from app.services.rag_service import rag_search_tool
 from app.services.activity_search_service import (
-    activity_search_tool,
     activity_search_with_llm_tool,
     set_bearer_token
 )
@@ -26,7 +28,6 @@ logger = logging.getLogger(__name__)
 MAX_MESSAGES = int(os.getenv('MAX_CONTEXT_MESSAGES', '10'))
 CONTEXT_STRATEGY = os.getenv('CONTEXT_STRATEGY', 'keep_system')
 
-# ============= THÊM PHẦN NÀY: Global unit_name management =============
 _current_unit_name = "default_unit"
 
 def set_current_unit_name(unit_name: str):
@@ -38,14 +39,17 @@ def set_current_unit_name(unit_name: str):
 def get_current_unit_name() -> str:
     """Get unit_name hiện tại"""
     return _current_unit_name
-# =======================================================================
 
 
 class AgentState(TypedDict):
     messages: Annotated[list, operator.add]
     user_role: str
     user_id: int
-    unit_name: str  # THÊM unit_name vào state
+    unit_name: str
+    # HITL fields
+    needs_clarification: bool
+    clarification_type: str  # "activity_filter", "date_range", etc.
+    clarification_message: str  # Message để show cho user
 
 
 def trim_messages(messages: list, max_messages: int = MAX_MESSAGES, strategy: str = CONTEXT_STRATEGY) -> list:
@@ -146,7 +150,11 @@ def create_agent_node(llm_with_tools):
         messages = state["messages"]
         user_role = state.get("user_role", "student")
         user_id = state.get("user_id", 0)
-        unit_name = state.get("unit_name", "default_unit")  # LẤY unit_name từ state
+        unit_name = state.get("unit_name", "default_unit")
+        
+        # ========= HITL: Không cần check clarification_message nữa =========
+        # Clarification_checker đã handle bằng Command(goto=END)
+        # Agent chỉ chạy khi không có clarification hoặc user đã response
         
         current_datetime = datetime.now()
         current_date_str = current_datetime.strftime("%d/%m/%Y")
@@ -154,23 +162,40 @@ def create_agent_node(llm_with_tools):
         current_weekday = ["Thứ Hai", "Thứ Ba", "Thứ Tư", "Thứ Năm", "Thứ Sáu", "Thứ Bảy", "Chủ Nhật"][current_datetime.weekday()]
         
         system_context = f"""
-Bạn là trợ lý AI cho hệ thống quản lý cố vấn học tập.
+Bạn là trợ lý AI thông minh, hỗ trợ người dùng trong hệ thống quản lý học tập.
+
+VAI TRÒ CỦA BẠN:
+- Bạn là công cụ hỗ trợ, KHÔNG phải là cố vấn hay sinh viên
+- Người dùng đang tương tác với bạn có vai trò: {user_role} (advisor = cố vấn, student = sinh viên)
+- Bạn giúp người dùng tìm kiếm thông tin, tra cứu tài liệu, và truy vấn hoạt động
 
 THÔNG TIN THỜI GIAN HIỆN TẠI:
 - Ngày hiện tại: {current_weekday}, {current_date_str}
 - Giờ hiện tại: {current_time_str}
 
-Người dùng hiện tại:
-- Vai trò: {user_role}
+THÔNG TIN NGƯỜI DÙNG ĐANG HỎI:
+- Vai trò: {user_role} {'(Cố vấn học tập)' if user_role == 'advisor' else '(Sinh viên)' if user_role == 'student' else ''}
 - ID: {user_id}
 - Đơn vị: {unit_name}
 
-Công cụ có sẵn:
-1. vector_rag_search - Tìm kiếm tài liệu trong thư viện của đơn vị "{unit_name}"
-2. activity_search - Tìm kiếm hoạt động ngoại khóa (dữ liệu thô)
-3. activity_search_with_summary - Tìm kiếm hoạt động + tóm tắt LLM
+CÔNG CỤ TÌM KIẾM:
+1. vector_rag_search - Tìm kiếm tài liệu, quy định trong thư viện của "{unit_name}"
+2. activity_search_with_summary - Tìm kiếm hoạt động ngoại khóa, sự kiện
 
-HƯỚNG DẪN SỬ DỤNG TOOLS:
+HƯỚNG DẪN TRẢ LỜI:
+
+KHI CHÀO HỎI hoặc CHAT THÔNG THƯỜNG:
+- TRẢ LỜI TRỰC TIẾP một cách thân thiện, tự nhiên
+- KHÔNG gọi tool, KHÔNG nhắc đến vai trò của user
+- Ví dụ đúng: "Chào bạn! Tôi có thể giúp gì cho bạn hôm nay?"
+- Ví dụ SAI: "Chào bạn, tôi có thể giúp gì với vai trò cố vấn..."
+
+CHỈ GỌI TOOL khi user hỏi cụ thể về:
+- Tài liệu, quy định, quy trình → dùng vector_rag_search
+- Hoạt động, sự kiện → dùng activity_search_with_summary
+
+KIẾN THỨC QUAN TRỌNG:
+Hoạt động có 2 loại điểm: CTXH (hiến máu, tình nguyện) và Rèn luyện (workshop, cuộc thi)
 
 vector_rag_search: Dùng khi user hỏi về:
 - Quy định, quy trình, nội quy
@@ -184,15 +209,8 @@ QUAN TRỌNG khi gọi vector_rag_search:
 - Ví dụ đúng: vector_rag_search(query="quy định học vụ", k=5)
 - Tool sẽ tự động lấy unit_name từ context
 
-activity_search: Dùng khi cần dữ liệu thô về hoạt động:
-- Liệt kê tất cả hoạt động
-- Export/báo cáo
-- Xử lý dữ liệu phức tạp
-
-activity_search_with_summary: Dùng khi user hỏi về hoạt động:
-- "Có hoạt động gì sắp tới?"
-- "Tìm hoạt động CTXH"
-- "Hoạt động nào cho điểm rèn luyện?"
+activity_search_with_summary: Dùng khi user hỏi về hoạt động ngoại khóa
+- Ví dụ: "Hoạt động sắp tới?", "Hoạt động CTXH", "Workshop", "Điểm rèn luyện"
 
 CÁCH GỌI TOOL ACTIVITY:
 activity_search_with_summary(
@@ -204,9 +222,19 @@ activity_search_with_summary(
 LƯU Ý QUAN TRỌNG:
 - KHÔNG BAO GIỜ truyền bearer_token vào tool call (hệ thống tự động xử lý)
 - KHÔNG BAO GIỜ truyền unit_name vào vector_rag_search (hệ thống tự động lấy từ context)
-- Chỉ gọi MỘT TOOL activity duy nhất cho mỗi câu hỏi
+- Với hoạt động, LUÔN dùng activity_search_with_summary (có tóm tắt LLM)
 - Nếu tool trả về total=0, DỪNG và trả lời "Không có hoạt động/tài liệu phù hợp"
 - KHÔNG suy đoán hoặc tự tạo dữ liệu hoạt động/tài liệu
+
+KHI USER HỎI VỀ LỌC HOẠT ĐỘNG:
+- Phân tích yêu cầu của user từ ngôn ngữ tự nhiên
+- Extract filters: điểm rèn luyện, thời gian, khoa, trạng thái
+- Gọi activity_search_with_summary với parameters phù hợp
+
+KHI CẦN CLARIFICATION:
+- Nếu user hỏi quá chung (VD: "Hoạt động nào?", "Activities?") mà bạn KHÔNG thể xác định được filters → HỎI lại user
+- Ví dụ trả lời: "Bạn muốn lọc theo tiêu chí nào? (điểm rèn luyện, thời gian, khoa, ...)"
+- Nếu user đã nói rõ tiêu chí (VD: "Hoạt động kiếm điểm CTXH", "Hoạt động tháng này") → KHÔNG hỏi lại, gọi tool ngay
 """
         
         # GEMINI FIX: Loại bỏ tất cả SystemMessage cũ, chỉ giữ SystemMessage mới ở đầu
@@ -231,7 +259,11 @@ LƯU Ý QUAN TRỌNG:
     return agent
 
 
+
+
+
 def should_continue(state: AgentState):
+    """Routing sau khi agent chạy"""
     messages = state["messages"]
     last_message = messages[-1]
     
@@ -241,16 +273,63 @@ def should_continue(state: AgentState):
     return END
 
 
+def create_llm(provider: str = None, temperature: float = 0.3):
+    """
+    Factory function to create LLM based on provider
+    
+    Args:
+        provider: "gemini" or "openai" (defaults to Config.LLM_PROVIDER)
+        temperature: Model temperature setting
+    
+    Returns:
+        ChatModel instance (Gemini or OpenAI)
+    
+    Raises:
+        ValueError: If provider is invalid or API key is missing
+    """
+    if provider is None:
+        provider = Config.LLM_PROVIDER.lower()
+    
+    logger.info(f"[LLM_FACTORY] Creating LLM with provider: {provider}")
+    
+    if provider == "gemini":
+        api_key = Config.GOOGLE_API_KEY
+        if not api_key:
+            raise ValueError("GOOGLE_API_KEY is not set in environment variables")
+        
+        model_name = Config.GEMINI_MODEL
+        logger.info(f"[LLM_FACTORY] Using Gemini model: {model_name}")
+        
+        return ChatGoogleGenerativeAI(
+            model=model_name,
+            google_api_key=api_key,
+            temperature=temperature
+        )
+    
+    elif provider == "openai":
+        api_key = Config.OPENAI_API_KEY
+        if not api_key:
+            raise ValueError("OPENAI_API_KEY is not set in environment variables")
+        
+        model_name = Config.OPENAI_MODEL
+        logger.info(f"[LLM_FACTORY] Using OpenAI model: {model_name}")
+        
+        return ChatOpenAI(
+            model=model_name,
+            openai_api_key=api_key,
+            temperature=temperature
+        )
+    
+    else:
+        raise ValueError(f"Invalid LLM_PROVIDER: {provider}. Must be 'gemini' or 'openai'")
+
+
 def create_langgraph():
-    llm = ChatGoogleGenerativeAI(
-        model="gemini-2.5-flash",
-        google_api_key=os.getenv('GOOGLE_API_KEY'),
-        temperature=0.3
-    )
+    # Create LLM using factory
+    llm = create_llm(temperature=0.3)
     
     tools = [
         rag_search_tool,
-        activity_search_tool,
         activity_search_with_llm_tool
     ]
     
@@ -258,19 +337,25 @@ def create_langgraph():
     
     workflow = StateGraph(AgentState)
     
+    # Simplified workflow: agent tự quyết định khi nào cần clarification
     workflow.add_node("agent", create_agent_node(llm_with_tools))
     workflow.add_node("tools", ToolNode(tools))
     
+    # Set entry point trực tiếp tới agent
     workflow.set_entry_point("agent")
+    
+    # Agent routing: gọi tools hoặc kết thúc
     workflow.add_conditional_edges(
         "agent",
         should_continue,
         {"tools": "tools", END: END}
     )
+    
+    # Tools -> agent
     workflow.add_edge("tools", "agent")
     
     checkpointer = MemorySaver()
-    logger.info(f"LangGraph: Using MemorySaver with context strategy: {CONTEXT_STRATEGY}, max messages: {MAX_MESSAGES}")
+    logger.info(f"LangGraph: Using {Config.LLM_PROVIDER} ({Config.GEMINI_MODEL if Config.LLM_PROVIDER == 'gemini' else Config.OPENAI_MODEL}) with MemorySaver, context strategy: {CONTEXT_STRATEGY}, max messages: {MAX_MESSAGES}")
 
     return workflow.compile(checkpointer=checkpointer)
 
@@ -283,7 +368,7 @@ def process_query(
     user_role: str = "student",
     user_id: int = 0,
     bearer_token: str = None,
-    unit_name: str = "default_unit",  # ========= THÊM PARAMETER NÀY =========
+    unit_name: str = "default_unit",
     thread_id: str | None = None
 ) -> str:
     """
@@ -324,12 +409,16 @@ def process_query(
         current_messages = state.values.get("messages", []) if state else []
         logger.info(f"[PROCESS_QUERY] Thread {thread_id} has {len(current_messages)} messages in history")
         
-        # ========= Prepare initial state với unit_name =========
+        # ========= Prepare initial state =========
         initial_state = {
             "messages": [HumanMessage(content=query)],
             "user_role": user_role,
             "user_id": user_id,
-            "unit_name": unit_name  # THÊM unit_name vào state
+            "unit_name": unit_name,
+            # Initialize HITL fields
+            "needs_clarification": False,
+            "clarification_type": "",
+            "clarification_message": ""
         }
         
         logger.info(f"[PROCESS_QUERY] Processing query from user {user_id} ({user_role}) in unit '{unit_name}'")
@@ -337,6 +426,7 @@ def process_query(
         # Invoke graph
         result = graph.invoke(initial_state, config)
         
+        # Lấy response message từ result
         messages = result.get("messages", [])
         if not messages:
             return json.dumps({
@@ -359,17 +449,23 @@ def process_query(
         if tool_messages:
             last_tool_msg = tool_messages[-1]
             try:
-                tool_result = json.loads(last_tool_msg.content) if isinstance(last_tool_msg.content, str) else last_tool_msg.content
-                
-                if isinstance(tool_result, dict):
-                    if tool_result.get('source') == 'activity':
-                        activities_raw = tool_result.get('activities_raw', [])
-                        total_activities = tool_result.get('total', 0)
-                        source = 'activity'
-                        logger.info(f"[PROCESS_QUERY] Found {total_activities} activities from tool")
-                    elif tool_result.get('source') == 'rag':
-                        source = 'rag'
-                        logger.info(f"[PROCESS_QUERY] RAG search performed in unit '{unit_name}'")
+                # Kiểm tra content có rỗng hoặc không hợp lệ
+                if not last_tool_msg.content or (isinstance(last_tool_msg.content, str) and last_tool_msg.content.strip() == ""):
+                    logger.warning(f"[PROCESS_QUERY] Tool returned empty content")
+                else:
+                    tool_result = json.loads(last_tool_msg.content) if isinstance(last_tool_msg.content, str) else last_tool_msg.content
+                    
+                    if isinstance(tool_result, dict):
+                        if tool_result.get('source') == 'activity':
+                            activities_raw = tool_result.get('activities_raw', [])
+                            total_activities = tool_result.get('total', 0)
+                            source = 'activity'
+                            logger.info(f"[PROCESS_QUERY] Found {total_activities} activities from tool")
+                        elif tool_result.get('source') == 'rag':
+                            source = 'rag'
+                            logger.info(f"[PROCESS_QUERY] RAG search performed in unit '{unit_name}'")
+            except json.JSONDecodeError as e:
+                logger.error(f"[PROCESS_QUERY] Tool message JSON parse error: {e}. Content: {last_tool_msg.content[:100] if last_tool_msg.content else 'None'}")
             except Exception as e:
                 logger.error(f"[PROCESS_QUERY] Tool message parse error: {e}")
         
@@ -382,7 +478,7 @@ def process_query(
                 "response": response_text,
                 "user_role": user_role,
                 "user_id": user_id,
-                "unit_name": unit_name,  # Thêm unit_name vào response
+                "unit_name": unit_name,
                 "source": source,
                 "activities": activities_raw,
                 "total_activities": total_activities,

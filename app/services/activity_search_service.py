@@ -7,9 +7,11 @@ import logging
 import requests
 from langchain_core.tools import StructuredTool
 from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_openai import ChatOpenAI
 from langchain_core.prompts import PromptTemplate
 import os
 from dotenv import load_dotenv
+from app.config import Config
 
 load_dotenv()
 
@@ -96,15 +98,43 @@ class ActivitySearchWithLLMResponse(BaseModel):
 class ActivitySearchService:
     def __init__(self):
         self.api_base_url = os.getenv('LARAVEL_API_URL', 'http://localhost:8000/api')
-        self.api_key = os.getenv('GOOGLE_API_KEY')
         
-        if self.api_key:
-            self.llm = ChatGoogleGenerativeAI(
-                model="gemini-2.5-flash",
-                google_api_key=self.api_key,
-                temperature=0.3,
-            )
-        else:
+        # Use the same LLM provider as main chatbot
+        provider = Config.LLM_PROVIDER.lower()
+        logger.info(f"[ACTIVITY_SERVICE] Initializing with LLM provider: {provider}")
+        
+        try:
+            if provider == "gemini":
+                api_key = Config.GOOGLE_API_KEY
+                if not api_key:
+                    logger.warning("[ACTIVITY_SERVICE] GOOGLE_API_KEY not set, LLM disabled")
+                    self.llm = None
+                else:
+                    model_name = Config.GEMINI_MODEL
+                    logger.info(f"[ACTIVITY_SERVICE] Using Gemini model: {model_name}")
+                    self.llm = ChatGoogleGenerativeAI(
+                        model=model_name,
+                        google_api_key=api_key,
+                        temperature=0.3,
+                    )
+            elif provider == "openai":
+                api_key = Config.OPENAI_API_KEY
+                if not api_key:
+                    logger.warning("[ACTIVITY_SERVICE] OPENAI_API_KEY not set, LLM disabled")
+                    self.llm = None
+                else:
+                    model_name = Config.OPENAI_MODEL
+                    logger.info(f"[ACTIVITY_SERVICE] Using OpenAI model: {model_name}")
+                    self.llm = ChatOpenAI(
+                        model=model_name,
+                        openai_api_key=api_key,
+                        temperature=0.3,
+                    )
+            else:
+                logger.error(f"[ACTIVITY_SERVICE] Invalid LLM_PROVIDER: {provider}")
+                self.llm = None
+        except Exception as e:
+            logger.error(f"[ACTIVITY_SERVICE] Failed to initialize LLM: {e}")
             self.llm = None
 
     def search_activities(self, request: ActivitySearchRequest, bearer_token: str) -> ActivitySearchResponse:

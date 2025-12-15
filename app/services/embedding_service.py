@@ -37,7 +37,6 @@ except ImportError:
         def __exit__(self, *args): pass
     _embedding_model_lock = DummyLock()
 
-# UNIFIED INDEX (backward compatibility - giờ không dùng nữa)
 UNIFIED_INDEX_NAME = "unified_documents_index"
 
 def get_redis_client():

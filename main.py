@@ -41,4 +41,11 @@ app.include_router(documents.router, prefix="/documents")
 app.include_router(vector.router, prefix="/documents/vector")
 
 if __name__ == "__main__":
-    uvicorn.run(app, host="0.0.0.0", port=3636)
+    uvicorn.run(
+        "main:app",
+        host="0.0.0.0", 
+        port=3636,
+        reload=True,
+        reload_dirs=["app", "."],
+        reload_includes=["*.py"]
+    )

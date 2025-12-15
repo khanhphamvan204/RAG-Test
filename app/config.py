@@ -9,6 +9,12 @@ class Config:
     GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
     DATABASE_URL = os.getenv("DATABASE_URL", "mongodb://localhost:27017/")
     
+    # LLM Provider Configuration
+    LLM_PROVIDER = os.getenv("LLM_PROVIDER", "gemini")  # Options: gemini, openai
+    OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+    GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+    OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o")
+    
     FILE_PATHS = {
         'file_folder': os.getenv("FILE_FOLDER", "Rag_Info/File_Folder"),
         'vector_folder': os.getenv("VECTOR_FOLDER", "Rag_Info/Faiss_Folder")

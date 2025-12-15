@@ -17,7 +17,6 @@ import uuid
 from datetime import datetime, timezone, timedelta
 import shutil
 import logging
-from langchain_google_genai import ChatGoogleGenerativeAI
 from redisvl.index import SearchIndex
 from redisvl.query import VectorQuery
 import time
