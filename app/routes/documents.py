@@ -58,8 +58,15 @@ async def list_documents(
     skip: int = 0,
     current_user: dict = Depends(verify_token_v2)
 ):
-    """Lấy danh sách tài liệu (có phân trang & tìm kiếm)."""
+    """Lấy danh sách tài liệu (có phân trang & tìm kiếm) - lọc theo unit của user."""
     try:
+        # Lấy thông tin user từ token
+        unit_name = current_user.get('unit_name', 'default_unit')
+        user_role = current_user.get('role', 'student')
+        user_id = current_user.get('id')
+        
+        logger.info(f"[LIST] User {user_id} ({user_role}) from unit '{unit_name}' listing documents")
+        
         documents = []
         total = 0
 
@@ -70,6 +77,10 @@ async def list_documents(
             collection = db["metadata"]
 
             filter_dict = {}
+            
+            # Lọc theo unit_name (tất cả user chỉ xem tài liệu trong unit của mình)
+            filter_dict["unit_name"] = unit_name
+            
             if file_type:
                 filter_dict["file_type"] = file_type
             if q:
@@ -98,6 +109,8 @@ async def list_documents(
                 "total": total,
                 "source": "mongodb",
                 "showing": len(documents),
+                "unit_name": unit_name,
+                "user_role": user_role
             }
         
         except PyMongoError as e:
@@ -108,8 +121,7 @@ async def list_documents(
         # Fallback: JSON
         logger.info("Falling back to JSON files")
         
-        # --- PHẦN ĐÃ SỬA ---
-        # Xây dựng đường dẫn duy nhất đến metadata.json dựa trên Config
+        # Xây dựng đường dẫn đến metadata.json dựa trên Config
         metadata_file = os.path.join(
             Config.DATA_PATH, 
             Config.FILE_PATHS.get('vector_folder', 'Rag_Info/Faiss_Folder'), 
@@ -122,7 +134,13 @@ async def list_documents(
                 with open(metadata_file, "r", encoding="utf-8") as f:
                     metadata_list = json.load(f)
 
-                # Áp dụng filter
+                # Lọc theo unit_name (tất cả user chỉ xem tài liệu trong unit của mình)
+                metadata_list = [
+                    item for item in metadata_list 
+                    if item.get("unit_name", "default_unit") == unit_name
+                ]
+                
+                # Áp dụng các filter khác
                 if file_type:
                     metadata_list = [item for item in metadata_list if item.get("file_type") == file_type]
                 if q:
@@ -138,7 +156,6 @@ async def list_documents(
                 
         except Exception as e:
             logger.error(f"Error reading {metadata_file}: {str(e)}")
-        # --- KẾT THÚC PHẦN SỬA ---
 
         # Sort + paginate
         all_documents.sort(key=lambda x: x.get("createdAt", ""), reverse=True)
@@ -150,6 +167,8 @@ async def list_documents(
             "total": total,
             "source": "json",
             "showing": len(documents),
+            "unit_name": unit_name,
+            "user_role": user_role
         }
 
     except Exception as e:
