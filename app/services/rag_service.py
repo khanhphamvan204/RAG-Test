@@ -1,8 +1,9 @@
 from pydantic import BaseModel
 import os
 import logging
-from typing import List
-from langchain_google_genai import ChatGoogleGenerativeAI
+from typing import List, Optional
+from langchain_groq import ChatGroq
+from langchain_openai import ChatOpenAI
 from langchain_core.prompts import PromptTemplate
 from redisvl.index import SearchIndex
 from redisvl.query import VectorQuery
@@ -34,14 +35,41 @@ class RAGResponse(BaseModel):
 
 class RAGSearchService:
     def __init__(self):
-        self.api_key = os.getenv('GOOGLE_API_KEY')
-        if self.api_key:
-            self.llm = ChatGoogleGenerativeAI(
-                model="gemini-2.5-flash",
-                google_api_key=self.api_key,
-                temperature=0.1,
-            )
-        else:
+        provider = Config.LLM_PROVIDER.lower()
+        logger.info(f"[RAG_SERVICE] Initializing with LLM provider: {provider}")
+        
+        try:
+            if provider == "groq":
+                api_key = Config.GROQ_API_KEY
+                if not api_key:
+                    logger.warning("[RAG_SERVICE] GROQ_API_KEY not set, LLM disabled")
+                    self.llm = None
+                else:
+                    model_name = Config.GROQ_MODEL
+                    logger.info(f"[RAG_SERVICE] Using Groq model: {model_name}")
+                    self.llm = ChatGroq(
+                        model=model_name,
+                        groq_api_key=api_key,
+                        temperature=0.1,
+                    )
+            elif provider == "openai":
+                api_key = Config.OPENAI_API_KEY
+                if not api_key:
+                    logger.warning("[RAG_SERVICE] OPENAI_API_KEY not set, LLM disabled")
+                    self.llm = None
+                else:
+                    model_name = Config.OPENAI_MODEL
+                    logger.info(f"[RAG_SERVICE] Using OpenAI model: {model_name}")
+                    self.llm = ChatOpenAI(
+                        model=model_name,
+                        openai_api_key=api_key,
+                        temperature=0.1,
+                    )
+            else:
+                logger.error(f"[RAG_SERVICE] Invalid LLM_PROVIDER: {provider}")
+                self.llm = None
+        except Exception as e:
+            logger.error(f"[RAG_SERVICE] Error initializing LLM: {e}")
             self.llm = None
 
     def search_with_llm(self, request: VectorSearchRequest, unit_name: str = "default_unit") -> RAGResponse:
@@ -144,11 +172,22 @@ class RAGSearchService:
             
             if top_results:
                 try:
-                    llm = ChatGoogleGenerativeAI(
-                        model="gemini-2.5-flash",
-                        google_api_key=os.getenv('GOOGLE_API_KEY'),
-                        temperature=0.3
-                    )
+                    provider = Config.LLM_PROVIDER.lower()
+                    
+                    if provider == "groq":
+                        llm = ChatGroq(
+                            model=Config.GROQ_MODEL,
+                            groq_api_key=Config.GROQ_API_KEY,
+                            temperature=0.3
+                        )
+                    elif provider == "openai":
+                        llm = ChatOpenAI(
+                            model=Config.OPENAI_MODEL,
+                            openai_api_key=Config.OPENAI_API_KEY,
+                            temperature=0.3
+                        )
+                    else:
+                        raise ValueError(f"Invalid LLM_PROVIDER: {provider}")
                     
                     context = "\n\n".join(
                         [f"Tài liệu {i+1} (từ {result['metadata']['filename']}):\n{result['content']}" 
@@ -223,7 +262,7 @@ rag_service = RAGSearchService()
 
 # WRAPPER FUNCTION CHO RAG với unit support
 
-def rag_search_wrapper(query, unit_name=None, k=5, similarity_threshold=0.3):
+def rag_search_wrapper(query: str, unit_name: Optional[str] = None, k: int = 5, similarity_threshold: float = 0.3):
     """
     Wrapper trả về dict cho RAG search với unit support
     

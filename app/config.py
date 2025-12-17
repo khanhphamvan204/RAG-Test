@@ -10,10 +10,12 @@ class Config:
     DATABASE_URL = os.getenv("DATABASE_URL", "mongodb://localhost:27017/")
     
     # LLM Provider Configuration
-    LLM_PROVIDER = os.getenv("LLM_PROVIDER", "gemini")  # Options: gemini, openai
+    LLM_PROVIDER = os.getenv("LLM_PROVIDER", "gemini")  # Options: gemini, openai, groq
     OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+    GROQ_API_KEY = os.getenv("GROQ_API_KEY")
     GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
     OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o")
+    GROQ_MODEL = os.getenv("GROQ_MODEL", "llama-3.1-8b-instant")
     
     FILE_PATHS = {
         'file_folder': os.getenv("FILE_FOLDER", "Rag_Info/File_Folder"),

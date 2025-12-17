@@ -130,6 +130,20 @@ class ActivitySearchService:
                         openai_api_key=api_key,
                         temperature=0.3,
                     )
+            elif provider == "groq":
+                api_key = Config.GROQ_API_KEY
+                if not api_key:
+                    logger.warning("[ACTIVITY_SERVICE] GROQ_API_KEY not set, LLM disabled")
+                    self.llm = None
+                else:
+                    from langchain_groq import ChatGroq
+                    model_name = Config.GROQ_MODEL
+                    logger.info(f"[ACTIVITY_SERVICE] Using Groq model: {model_name}")
+                    self.llm = ChatGroq(
+                        model=model_name,
+                        groq_api_key=api_key,
+                        temperature=0.3,
+                    )
             else:
                 logger.error(f"[ACTIVITY_SERVICE] Invalid LLM_PROVIDER: {provider}")
                 self.llm = None
@@ -406,14 +420,14 @@ def set_bearer_token(token: str):
 
 
 def activity_search_wrapper(
-    user_role, 
-    user_id, 
-    from_date=None, 
-    to_date=None, 
-    status=None, 
-    title=None, 
-    point_type=None, 
-    organizer_unit=None
+    user_role: str, 
+    user_id: int, 
+    from_date: Optional[str] = None, 
+    to_date: Optional[str] = None, 
+    status: Optional[str] = None, 
+    title: Optional[str] = None, 
+    point_type: Optional[str] = None, 
+    organizer_unit: Optional[str] = None
 ):
     """
     Wrapper TỰ ĐỘNG INJECT TOKEN từ global variable
@@ -460,14 +474,14 @@ def activity_search_wrapper(
 
 
 def activity_search_with_llm_wrapper(
-    user_role, 
-    user_id, 
-    from_date=None, 
-    to_date=None, 
-    status=None, 
-    title=None, 
-    point_type=None, 
-    organizer_unit=None
+    user_role: str, 
+    user_id: int, 
+    from_date: Optional[str] = None, 
+    to_date: Optional[str] = None, 
+    status: Optional[str] = None, 
+    title: Optional[str] = None, 
+    point_type: Optional[str] = None, 
+    organizer_unit: Optional[str] = None
 ):
     """
     Wrapper TỰ ĐỘNG INJECT TOKEN

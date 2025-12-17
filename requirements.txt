@@ -19,6 +19,7 @@ langchain==0.3.7
 langchain-core==0.3.17
 langchain-community==0.3.7
 langchain-google-genai==2.0.5
+langchain-groq==0.2.1
 langchain-huggingface==0.1.2
 langchain_experimental==0.3.3
 langgraph==0.2.45
