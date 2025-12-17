@@ -23,7 +23,7 @@ logger = logging.getLogger(__name__)
 
 class ActivitySearchRequest(BaseModel):
     """Request model cho activity search - KHÔNG CÓ bearer_token"""
-    user_role: Literal['advisor', 'student'] = Field(..., description="Role của user")
+    user_role: Literal['advisor', 'student', 'admin'] = Field(..., description="Role của user (advisor/student/admin)")
     user_id: int = Field(..., description="ID của user")
     from_date: Optional[str] = Field(None, description="Lọc từ ngày")
     to_date: Optional[str] = Field(None, description="Lọc đến ngày")

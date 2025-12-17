@@ -439,6 +439,7 @@ def process_query(
         }
         
         logger.info(f"[PROCESS_QUERY] Processing query from user {user_id} ({user_role}) in unit '{unit_name}'")
+        logger.info(f"[PROCESS_QUERY] Original user query: {query}")
         
         # Invoke graph
         result = graph.invoke(initial_state, config)
@@ -456,8 +457,9 @@ def process_query(
         last_message = messages[-1]
         response_text = last_message.content if hasattr(last_message, 'content') else str(last_message)
         
-        # Extract activities và source từ tool messages
+        # Extract activities, context và source từ tool messages
         activities_raw = []
+        rag_context = None
         source = "general"
         total_activities = 0
         
@@ -480,7 +482,8 @@ def process_query(
                             logger.info(f"[PROCESS_QUERY] Found {total_activities} activities from tool")
                         elif tool_result.get('source') == 'rag':
                             source = 'rag'
-                            logger.info(f"[PROCESS_QUERY] RAG search performed in unit '{unit_name}'")
+                            rag_context = tool_result.get('context', None)
+                            logger.info(f"[PROCESS_QUERY] RAG search performed in unit '{unit_name}' with {len(rag_context) if rag_context else 0} documents")
             except json.JSONDecodeError as e:
                 logger.error(f"[PROCESS_QUERY] Tool message JSON parse error: {e}. Content: {last_tool_msg.content[:100] if last_tool_msg.content else 'None'}")
             except Exception as e:
@@ -489,22 +492,29 @@ def process_query(
         total_messages_after = len(messages)
         logger.info(f"[PROCESS_QUERY] Thread {thread_id} now has {total_messages_after} messages after processing")
         
+        # Build response data
+        response_data = {
+            "response": response_text,
+            "user_role": user_role,
+            "user_id": user_id,
+            "unit_name": unit_name,
+            "source": source,
+            "activities": activities_raw,
+            "total_activities": total_activities,
+            "context_info": {
+                "total_messages": total_messages_after,
+                "max_messages": MAX_MESSAGES,
+                "strategy": CONTEXT_STRATEGY
+            }
+        }
+        
+        # Thêm rag_context nếu có
+        if rag_context is not None:
+            response_data["retrieval_context"] = rag_context
+        
         return json.dumps({
             "status": "success",
-            "data": {
-                "response": response_text,
-                "user_role": user_role,
-                "user_id": user_id,
-                "unit_name": unit_name,
-                "source": source,
-                "activities": activities_raw,
-                "total_activities": total_activities,
-                "context_info": {
-                    "total_messages": total_messages_after,
-                    "max_messages": MAX_MESSAGES,
-                    "strategy": CONTEXT_STRATEGY
-                }
-            },
+            "data": response_data,
             "error": None,
             "thread_id": thread_id
         }, ensure_ascii=False, indent=2)

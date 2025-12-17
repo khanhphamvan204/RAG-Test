@@ -32,6 +32,7 @@ class RAGResponse(BaseModel):
     llm_response: str
     search_type: str = "rag"
     unit_name: str = ""
+    context: Optional[List[dict]] = None  # Danh sách tài liệu được retrieval
 
 class RAGSearchService:
     def __init__(self):
@@ -102,12 +103,12 @@ class RAGSearchService:
             query_embedding = embedding_model.embed_query(request.query)
             query_vector = np.array(query_embedding, dtype=np.float32)
             
-            # Vector query
+            # Vector query - chỉ lấy đúng k results để tối ưu tokens
             v = VectorQuery(
                 vector=query_vector.tolist(),
                 vector_field_name="embedding",
                 return_fields=["content", "doc_id", "filename", "uploaded_by", "created_at", "chunk_id", "unit_name"],
-                num_results=request.k * 2
+                num_results=min(request.k, 3)  # Giới hạn tối đa 3 documents để tránh 429 TPM
             )
             
             # Schema cho unit index
@@ -194,6 +195,10 @@ class RAGSearchService:
                          for i, result in enumerate(top_results)]
                     )
                     
+                    # Log context để debug
+                    logger.info(f"[RAG] Context length: {len(context)} characters")
+                    logger.debug(f"[RAG] Context preview: {context[:500]}...")
+                    
                     prompt_template = PromptTemplate(
                         input_variables=["query", "context", "unit_name"],
                         template="""
@@ -239,10 +244,23 @@ Hãy trả lời dựa trên tài liệu trên.
                     logger.error(f"[RAG] LLM error: {str(e)}")
                     llm_response = "Không thể tạo câu trả lời từ LLM."
             
+            # Chuẩn bị context để trả về
+            retrieval_context = [
+                {
+                    "content": result['content'],
+                    "filename": result['metadata'].get('filename', 'unknown'),
+                    "similarity": result['metadata'].get('similarity_score', 0),
+                    "doc_id": result['metadata'].get('doc_id', ''),
+                    "chunk_id": result['metadata'].get('chunk_id', 0)
+                }
+                for result in top_results
+            ] if top_results else None
+            
             return RAGResponse(
                 llm_response=llm_response, 
                 search_type="rag",
-                unit_name=unit_name
+                unit_name=unit_name,
+                context=retrieval_context
             )
             
         except Exception as e:
@@ -262,7 +280,7 @@ rag_service = RAGSearchService()
 
 # WRAPPER FUNCTION CHO RAG với unit support
 
-def rag_search_wrapper(query: str, unit_name: Optional[str] = None, k: int = 5, similarity_threshold: float = 0.3):
+def rag_search_wrapper(query: str, unit_name: Optional[str] = None, k: int = 3, similarity_threshold: float = 0.3):
     """
     Wrapper trả về dict cho RAG search với unit support
     
@@ -282,7 +300,13 @@ def rag_search_wrapper(query: str, unit_name: Optional[str] = None, k: int = 5, 
             logger.warning(f"[RAG_WRAPPER] Cannot get unit_name from context: {e}, using default")
             unit_name = "default_unit"
     
-    logger.info(f"[RAG_WRAPPER] Query in unit '{unit_name}': {query[:50]}...")
+    # Debug: log query với encoding UTF-8
+    try:
+        logger.info(f"[RAG_WRAPPER] Query in unit '{unit_name}': {query[:50]}...")
+        logger.debug(f"[RAG_WRAPPER] Query type: {type(query)}, length: {len(query)}")
+        logger.debug(f"[RAG_WRAPPER] Query repr: {repr(query[:50])}")
+    except Exception as e:
+        logger.error(f"[RAG_WRAPPER] Error logging query: {e}")
     
     result = rag_service.search_with_llm(
         VectorSearchRequest(
@@ -293,17 +317,19 @@ def rag_search_wrapper(query: str, unit_name: Optional[str] = None, k: int = 5, 
         unit_name=unit_name
     )
     
-    # Trả về dict structured
+    # Trả về dict structured với context
     output = {
         "llm_response": result.llm_response,
         "source": "rag",
         "search_type": "rag",
         "unit_name": unit_name,
         "activities_raw": [],  # RAG không có activities
-        "total": 0
+        "total": 0,
+        "context": result.context  # Thêm context từ RAG
     }
     
-    logger.info(f"[RAG_WRAPPER] Response from unit '{unit_name}'")
+    context_count = len(result.context) if result.context else 0
+    logger.info(f"[RAG_WRAPPER] Response from unit '{unit_name}' with {context_count} documents")
     
     return output
 
@@ -325,18 +351,19 @@ Thực hiện RAG search trên Redis vector database theo ĐƠN VỊ (unit-based
 Input parameters:
 - query (str, REQUIRED): Câu hỏi của người dùng
 - unit_name (str, OPTIONAL): Tên đơn vị - NẾU KHÔNG TRUYỀN thì dùng unit của user hiện tại
-- k (int, default=5): Số lượng documents
+- k (int, default=3): Số lượng documents
 - similarity_threshold (float, default=0.3): Ngưỡng similarity (0-1)
 
 Output: 
 - llm_response: Câu trả lời từ LLM dựa trên tài liệu
 - source: "rag"
 - unit_name: Tên đơn vị đã search
+- context: Danh sách tài liệu retrieval được
 - activities_raw: [] (RAG không trả về hoạt động)
 
 **LƯU Ý**: 
 - Tool tự động lấy unit_name từ context, KHÔNG CẦN truyền thủ công
 - Chỉ search trong thư viện của đơn vị được chỉ định
-- Ví dụ gọi tool: vector_rag_search(query="quy định học vụ", k=5)
+- Ví dụ gọi tool: vector_rag_search(query="quy định học vụ")
 """
 )
