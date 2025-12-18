@@ -8,6 +8,8 @@ import requests
 from langchain_core.tools import StructuredTool
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_openai import ChatOpenAI
+from langchain_groq import ChatGroq
+from langchain_ollama import ChatOllama
 from langchain_core.prompts import PromptTemplate
 import os
 from dotenv import load_dotenv
@@ -136,7 +138,6 @@ class ActivitySearchService:
                     logger.warning("[ACTIVITY_SERVICE] GROQ_API_KEY not set, LLM disabled")
                     self.llm = None
                 else:
-                    from langchain_groq import ChatGroq
                     model_name = Config.GROQ_MODEL
                     logger.info(f"[ACTIVITY_SERVICE] Using Groq model: {model_name}")
                     self.llm = ChatGroq(
@@ -144,6 +145,15 @@ class ActivitySearchService:
                         groq_api_key=api_key,
                         temperature=0.3,
                     )
+            elif provider == "ollama":
+                base_url = Config.OLLAMA_BASE_URL
+                model_name = Config.OLLAMA_MODEL
+                logger.info(f"[ACTIVITY_SERVICE] Using Ollama model: {model_name} at {base_url}")
+                self.llm = ChatOllama(
+                    model=model_name,
+                    base_url=base_url,
+                    temperature=0.3,
+                )
             else:
                 logger.error(f"[ACTIVITY_SERVICE] Invalid LLM_PROVIDER: {provider}")
                 self.llm = None

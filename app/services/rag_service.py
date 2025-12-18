@@ -4,6 +4,8 @@ import logging
 from typing import List, Optional
 from langchain_groq import ChatGroq
 from langchain_openai import ChatOpenAI
+from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_ollama import ChatOllama
 from langchain_core.prompts import PromptTemplate
 from redisvl.index import SearchIndex
 from redisvl.query import VectorQuery
@@ -40,17 +42,17 @@ class RAGSearchService:
         logger.info(f"[RAG_SERVICE] Initializing with LLM provider: {provider}")
         
         try:
-            if provider == "groq":
-                api_key = Config.GROQ_API_KEY
+            if provider == "gemini":
+                api_key = Config.GOOGLE_API_KEY
                 if not api_key:
-                    logger.warning("[RAG_SERVICE] GROQ_API_KEY not set, LLM disabled")
+                    logger.warning("[RAG_SERVICE] GOOGLE_API_KEY not set, LLM disabled")
                     self.llm = None
                 else:
-                    model_name = Config.GROQ_MODEL
-                    logger.info(f"[RAG_SERVICE] Using Groq model: {model_name}")
-                    self.llm = ChatGroq(
+                    model_name = Config.GEMINI_MODEL
+                    logger.info(f"[RAG_SERVICE] Using Gemini model: {model_name}")
+                    self.llm = ChatGoogleGenerativeAI(
                         model=model_name,
-                        groq_api_key=api_key,
+                        google_api_key=api_key,
                         temperature=0.1,
                     )
             elif provider == "openai":
@@ -66,6 +68,28 @@ class RAGSearchService:
                         openai_api_key=api_key,
                         temperature=0.1,
                     )
+            elif provider == "groq":
+                api_key = Config.GROQ_API_KEY
+                if not api_key:
+                    logger.warning("[RAG_SERVICE] GROQ_API_KEY not set, LLM disabled")
+                    self.llm = None
+                else:
+                    model_name = Config.GROQ_MODEL
+                    logger.info(f"[RAG_SERVICE] Using Groq model: {model_name}")
+                    self.llm = ChatGroq(
+                        model=model_name,
+                        groq_api_key=api_key,
+                        temperature=0.1,
+                    )
+            elif provider == "ollama":
+                base_url = Config.OLLAMA_BASE_URL
+                model_name = Config.OLLAMA_MODEL
+                logger.info(f"[RAG_SERVICE] Using Ollama model: {model_name} at {base_url}")
+                self.llm = ChatOllama(
+                    model=model_name,
+                    base_url=base_url,
+                    temperature=0.1,
+                )
             else:
                 logger.error(f"[RAG_SERVICE] Invalid LLM_PROVIDER: {provider}")
                 self.llm = None
@@ -175,16 +199,28 @@ class RAGSearchService:
                 try:
                     provider = Config.LLM_PROVIDER.lower()
                     
-                    if provider == "groq":
-                        llm = ChatGroq(
-                            model=Config.GROQ_MODEL,
-                            groq_api_key=Config.GROQ_API_KEY,
+                    if provider == "gemini":
+                        llm = ChatGoogleGenerativeAI(
+                            model=Config.GEMINI_MODEL,
+                            google_api_key=Config.GOOGLE_API_KEY,
                             temperature=0.3
                         )
                     elif provider == "openai":
                         llm = ChatOpenAI(
                             model=Config.OPENAI_MODEL,
                             openai_api_key=Config.OPENAI_API_KEY,
+                            temperature=0.3
+                        )
+                    elif provider == "groq":
+                        llm = ChatGroq(
+                            model=Config.GROQ_MODEL,
+                            groq_api_key=Config.GROQ_API_KEY,
+                            temperature=0.3
+                        )
+                    elif provider == "ollama":
+                        llm = ChatOllama(
+                            model=Config.OLLAMA_MODEL,
+                            base_url=Config.OLLAMA_BASE_URL,
                             temperature=0.3
                         )
                     else:

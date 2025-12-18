@@ -5,6 +5,7 @@ from langgraph.checkpoint.memory import MemorySaver
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_openai import ChatOpenAI
 from langchain_groq import ChatGroq
+from langchain_ollama import ChatOllama
 from langchain_core.messages import SystemMessage, HumanMessage, ToolMessage, AIMessage
 from langgraph.types import Command
 import operator
@@ -336,8 +337,20 @@ def create_llm(provider: str = None, temperature: float = 0.3):
             temperature=temperature
         )
     
+    elif provider == 'ollama':
+        base_url = Config.OLLAMA_BASE_URL
+        model_name = Config.OLLAMA_MODEL
+        
+        logger.info(f"[LLM_FACTORY] Using Ollama model: {model_name} at {base_url}")
+        
+        return ChatOllama(
+            model=model_name,
+            base_url=base_url,
+            temperature=temperature
+        )
+    
     else:
-        raise ValueError(f"Invalid LLM_PROVIDER: {provider}. Must be 'gemini', 'openai', or 'groq'")
+        raise ValueError(f"Invalid LLM_PROVIDER: {provider}. Must be 'gemini', 'openai', 'groq', or 'ollama'")
 
 
 def create_langgraph():
